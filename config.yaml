@@ -1,0 +1,40 @@
+# Mem Configuration File
+# All settings have sensible defaults that can be overridden here
+
+# Database configuration
+database:
+  path: "mem.db"                    # SQLite database file path
+
+# Capture settings for video processing
+capture:
+  frame:
+    interval_seconds: 5              # Seconds between frame extraction
+    jpeg_quality: 85                 # JPEG quality (1-100, higher is better quality)
+  
+  audio:
+    chunk_duration_seconds: 300      # Audio chunk size in seconds (5 minutes)
+    sample_rate: 16000               # Audio sample rate for Whisper processing
+
+# Whisper transcription settings
+whisper:
+  model: "base"                      # Model size: tiny, base, small, medium, large
+  language: "auto"                   # Language code or "auto" for automatic detection
+  fallback_language: "en"            # Default language when detection fails
+  device: "cpu"                      # Processing device: cpu or cuda
+
+# File handling configuration
+files:
+  video_pattern: "*.mp4"             # File pattern for batch processing
+  filename_format: "YYYY-MM-DD_HH-MM-SS"  # Required video filename format
+  filename_regex: "^(\\d{4})-(\\d{2})-(\\d{2})_(\\d{2})-(\\d{2})-(\\d{2})$"  # Validation regex
+
+# CLI display settings
+display:
+  frames_limit: 100                  # Maximum frames to show in list command
+  default_time_range_days: 1         # Default days to look back when no range specified
+
+# Logging configuration
+logging:
+  level: "INFO"                      # Default log level: DEBUG, INFO, WARNING, ERROR
+  debug_level: "DEBUG"               # Log level when --debug flag is used
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"  # Log message format
