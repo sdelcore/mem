@@ -7,8 +7,8 @@ capture:
   frame:
     interval_seconds: 5
     jpeg_quality: 85
-    enable_deduplication: false
-    similarity_threshold: 95.0
+    enable_deduplication: true
+    similarity_threshold: 100.0
   audio:
     chunk_duration_seconds: 300
     sample_rate: 16000
