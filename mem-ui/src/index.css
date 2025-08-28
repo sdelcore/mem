@@ -1,0 +1,199 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply font-sans antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
+}
+
+/* Timeline segment colors - earthy palette */
+:root {
+  --color-no-content: #ECE3CE;     /* cream */
+  --color-frame: #4F6F52;           /* forest green */
+  --color-transcript: #739072;      /* sage green */
+  --color-both: #3A4D39;            /* dark forest */
+  --color-annotation: #638060;      /* mid sage */
+}
+
+/* Custom scrollbar styles */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #739072 #ECE3CE;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #ECE3CE;
+  border-radius: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #739072;
+  border-radius: 10px;
+  border: 2px solid #ECE3CE;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #4F6F52;
+}
+
+/* Timeline scrollbar specific */
+.timeline-scrollbar::-webkit-scrollbar {
+  height: 8px;
+}
+
+.timeline-scrollbar::-webkit-scrollbar-track {
+  background: #f8f6f0;
+  border-radius: 10px;
+}
+
+.timeline-scrollbar::-webkit-scrollbar-thumb {
+  background: #4F6F52;
+  border-radius: 10px;
+}
+
+.timeline-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #3A4D39;
+}
+
+/* Glass morphism effect */
+.glass {
+  @apply backdrop-blur-xl bg-cream-50/70 border border-cream-200/20;
+}
+
+/* Solid color backgrounds - no gradients */
+.gradient-primary {
+  @apply bg-forest-500;
+}
+
+.gradient-soft {
+  @apply bg-cream-50;
+}
+
+/* Button hover effects */
+.btn-hover {
+  @apply transition-colors duration-150;
+}
+
+/* Card animations */
+.card-hover {
+  @apply transition-colors duration-150;
+}
+
+/* Loading animation */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.skeleton {
+  animation: shimmer 2s infinite;
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 1000px 100%;
+}
+
+/* Animations */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* React DatePicker Custom Styles */
+.datepicker-wrapper .react-datepicker {
+  @apply bg-forest-700 border border-forest-500 rounded-lg shadow-xl;
+  font-family: inherit;
+}
+
+.datepicker-wrapper .react-datepicker__header {
+  @apply bg-forest-600 border-b border-forest-500;
+}
+
+.datepicker-wrapper .react-datepicker__current-month {
+  @apply text-cream-100 font-semibold;
+}
+
+.datepicker-wrapper .react-datepicker__day-name {
+  @apply text-sage-300;
+}
+
+.datepicker-wrapper .react-datepicker__day {
+  @apply text-cream-200 hover:bg-forest-500 hover:text-cream-50 rounded;
+}
+
+.datepicker-wrapper .react-datepicker__day--selected {
+  @apply bg-sage-400 text-cream-50 font-semibold;
+}
+
+.datepicker-wrapper .react-datepicker__day--keyboard-selected {
+  @apply bg-forest-500 text-cream-50;
+}
+
+.datepicker-wrapper .react-datepicker__day--today {
+  @apply bg-forest-600 text-sage-300 font-semibold;
+}
+
+.datepicker-wrapper .react-datepicker__day--disabled {
+  @apply text-forest-600 cursor-not-allowed opacity-50;
+}
+
+.datepicker-wrapper .react-datepicker__navigation {
+  @apply text-cream-200;
+}
+
+.datepicker-wrapper .react-datepicker__navigation:hover {
+  @apply text-cream-100;
+}
+
+.earthy-calendar {
+  @apply bg-forest-700 border border-forest-500 rounded-lg shadow-xl;
+}
+
+.earthy-calendar .react-datepicker__header {
+  @apply bg-forest-600 border-b border-forest-500;
+}
+
+.earthy-calendar .react-datepicker__current-month {
+  @apply text-cream-100 font-semibold;
+}
+
+.earthy-calendar .react-datepicker__day-name {
+  @apply text-sage-300;
+}
+
+.earthy-calendar .react-datepicker__day {
+  @apply text-cream-200 hover:bg-forest-500 hover:text-cream-50 rounded;
+}
+
+.earthy-calendar .react-datepicker__day--selected {
+  @apply bg-sage-400 text-cream-50 font-semibold;
+}
+
+.earthy-calendar .react-datepicker__day--today {
+  @apply bg-forest-600 text-sage-300 font-semibold;
+}
+
+.earthy-calendar .react-datepicker__day--disabled {
+  @apply text-forest-600 cursor-not-allowed opacity-50;
+}
