@@ -15,6 +15,7 @@ venv/
 *.db
 *.sqlite
 *.sqlite3
+*.duckdb*
 
 # IDE
 .vscode/

@@ -1,40 +1,35 @@
-# Mem Configuration File
-# All settings have sensible defaults that can be overridden here
+# Mem Configuration Example
 
-# Database configuration
 database:
-  path: "mem.db"                    # SQLite database file path
+  path: mem.duckdb
 
-# Capture settings for video processing
 capture:
   frame:
-    interval_seconds: 5              # Seconds between frame extraction
-    jpeg_quality: 85                 # JPEG quality (1-100, higher is better quality)
-  
+    interval_seconds: 5
+    jpeg_quality: 85
+    enable_deduplication: false
+    similarity_threshold: 95.0
   audio:
-    chunk_duration_seconds: 300      # Audio chunk size in seconds (5 minutes)
-    sample_rate: 16000               # Audio sample rate for Whisper processing
+    chunk_duration_seconds: 300
+    sample_rate: 16000
 
-# Whisper transcription settings
 whisper:
-  model: "base"                      # Model size: tiny, base, small, medium, large
-  language: "auto"                   # Language code or "auto" for automatic detection
-  fallback_language: "en"            # Default language when detection fails
-  device: "cpu"                      # Processing device: cpu or cuda
+  model: base
+  language: auto
+  fallback_language: en
+  device: cpu
 
-# File handling configuration
 files:
-  video_pattern: "*.mp4"             # File pattern for batch processing
-  filename_format: "YYYY-MM-DD_HH-MM-SS"  # Required video filename format
-  filename_regex: "^(\\d{4})-(\\d{2})-(\\d{2})_(\\d{2})-(\\d{2})-(\\d{2})$"  # Validation regex
+  filename_format: YYYY-MM-DD_HH-MM-SS
+  filename_regex: ^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})$
 
-# CLI display settings
-display:
-  frames_limit: 100                  # Maximum frames to show in list command
-  default_time_range_days: 1         # Default days to look back when no range specified
+api:
+  host: 0.0.0.0
+  port: 8000
+  max_upload_size: 5368709120  # 5GB
+  default_time_range_days: 1
 
-# Logging configuration
 logging:
-  level: "INFO"                      # Default log level: DEBUG, INFO, WARNING, ERROR
-  debug_level: "DEBUG"               # Log level when --debug flag is used
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"  # Log message format
+  level: INFO
+  debug_level: DEBUG
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

@@ -1,8 +1,9 @@
 """Configuration management for Mem."""
 
-import yaml
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Optional
+
+import yaml
 from pydantic import BaseModel
 
 
@@ -11,6 +12,8 @@ class CaptureFrameConfig(BaseModel):
 
     interval_seconds: int = 5
     jpeg_quality: int = 85
+    enable_deduplication: bool = True  # Enable perceptual hash deduplication
+    similarity_threshold: float = 95.0  # Threshold for considering frames similar (0-100)
 
 
 class CaptureAudioConfig(BaseModel):
@@ -34,6 +37,9 @@ class WhisperConfig(BaseModel):
     language: str = "auto"
     fallback_language: str = "en"
     device: str = "cpu"
+    detect_non_speech: bool = True
+    no_speech_threshold: float = 0.6
+    logprob_threshold: float = -1.0
 
 
 class DatabaseConfig(BaseModel):
@@ -45,15 +51,16 @@ class DatabaseConfig(BaseModel):
 class FilesConfig(BaseModel):
     """File handling configuration."""
 
-    video_pattern: str = "*.mp4"
     filename_format: str = "YYYY-MM-DD_HH-MM-SS"
     filename_regex: str = r"^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})$"
 
 
-class DisplayConfig(BaseModel):
-    """CLI display configuration."""
+class APIConfig(BaseModel):
+    """API server configuration."""
 
-    frames_limit: int = 100
+    host: str = "0.0.0.0"
+    port: int = 8000
+    max_upload_size: int = 5368709120  # 5GB
     default_time_range_days: int = 1
 
 
@@ -72,7 +79,7 @@ class Config(BaseModel):
     capture: CaptureConfig = CaptureConfig()
     whisper: WhisperConfig = WhisperConfig()
     files: FilesConfig = FilesConfig()
-    display: DisplayConfig = DisplayConfig()
+    api: APIConfig = APIConfig()
     logging: LoggingConfig = LoggingConfig()
 
 
@@ -116,7 +123,7 @@ def load_config(path: Optional[Path] = None) -> Config:
             ),
             whisper=WhisperConfig(**data.get("whisper", {})),
             files=FilesConfig(**data.get("files", {})),
-            display=DisplayConfig(**data.get("display", {})),
+            api=APIConfig(**data.get("api", {})),
             logging=LoggingConfig(**data.get("logging", {})),
         )
     else:

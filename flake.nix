@@ -140,10 +140,6 @@
             echo "uv: $(uv --version)"
             echo "Node: $(node --version)"
             echo ""
-            echo "To get started:"
-            echo "  1. Install deps: uv sync"
-            echo "  2. Run tests: make test"
-            echo ""
             
             # Set up library paths for native extensions
             export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib:$LD_LIBRARY_PATH"

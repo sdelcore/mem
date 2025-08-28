@@ -6,33 +6,73 @@
 
 2. **Strict Input Format**: Videos must follow `YYYY-MM-DD_HH-MM-SS.mp4` naming to ensure reliable timestamp extraction.
 
-3. **Self-Contained Database**: Images stored as BLOBs, not file paths, making the database portable and self-contained.
+3. **Self-Contained Database**: Images stored as BLOBs with perceptual hashing for ~90% storage reduction.
 
 4. **UTC Everywhere**: All timestamps are absolute UTC, never relative to video start.
+
+5. **API-First Design**: REST API provides all functionality for video processing and data retrieval.
 
 ## System Components
 
 ```
 mem/
 ├── src/
+│   ├── api/               # FastAPI backend
+│   │   ├── app.py        # Application setup
+│   │   ├── routes.py     # API endpoints
+│   │   ├── services.py   # Business logic
+│   │   └── models.py     # Request/response schemas
+│   │
 │   ├── capture/           # Data extraction
 │   │   ├── extractor.py   # Frame extraction, timestamp parsing
+│   │   ├── frame.py       # Perceptual hashing and deduplication
 │   │   ├── transcriber.py # Whisper audio transcription
 │   │   └── pipeline.py    # Processing orchestration
 │   │
 │   ├── storage/           # Database layer
-│   │   ├── db.py         # SQLite operations
+│   │   ├── db.py         # DuckDB operations
 │   │   ├── models.py     # Pydantic data models
 │   │   └── schema.sql    # Database schema
 │   │
-│   └── cli_new.py        # Command-line interface
+│   └── config.py         # Configuration management
 │
-├── scripts/              # Utility scripts
-│   └── create_test_video.py
-│
-└── data/                 # Runtime data
-    └── mem.db           # SQLite database
+└── config.yaml           # Configuration file
 ```
+
+## API Architecture
+
+### Request Flow
+
+```mermaid
+graph TB
+    A[Client Request] --> B[FastAPI Router]
+    B --> C[Service Layer]
+    C --> D{Request Type}
+    D -->|Capture| E[CaptureService]
+    D -->|Search| F[SearchService]
+    E --> G[VideoCaptureProcessor]
+    F --> H[Database]
+    G --> I[Frame Extractor]
+    G --> J[Audio Transcriber]
+    G --> K[Frame Deduplicator]
+    I --> H
+    J --> H
+    K --> H
+    H --> L[Response]
+    L --> A
+```
+
+### Core API Endpoints
+
+1. **POST /api/capture** - Async video processing
+2. **GET /api/search** - Universal data access
+3. **GET /api/status** - System monitoring
+
+The `/api/search` endpoint uses a type parameter to handle all data retrieval:
+- `type=timeline` - Temporal data with frames and transcripts
+- `type=frame` - Direct frame image access
+- `type=transcript` - Text search in transcriptions
+- `type=all` - Combined search
 
 ## Data Flow
 
@@ -43,41 +83,52 @@ graph LR
     C --> D[Create Source Record]
     D --> E[Extract Frames]
     D --> F[Extract Audio]
-    E --> G[Store as BLOBs]
-    F --> H[Transcribe Chunks]
-    H --> I[Store Transcriptions]
-    G --> J[(Database)]
-    I --> J
+    E --> G[Perceptual Hash]
+    G --> H{Duplicate?}
+    H -->|No| I[Store Unique Frame]
+    H -->|Yes| J[Reference Existing]
+    F --> K[Transcribe Chunks]
+    K --> L[Store Transcriptions]
+    I --> M[(DuckDB)]
+    J --> M
+    L --> M
 ```
 
-## Database Schema
+## Database Schema (DuckDB)
 
 ### Core Tables
 
 **sources**
-- Tracks video files and streams
+- Tracks video files and future streams
 - Stores start/end UTC timestamps
-- Records duration and frame count
+- Records metadata (fps, dimensions, codec)
 
-**frames**
+**unique_frames**
+- Deduplicated frames with perceptual hashing
 - Stores extracted frames as JPEG BLOBs
-- Each frame has absolute UTC timestamp
-- Includes dimensions and size metadata
+- Each frame has first/last seen timestamps
+- ~90% storage reduction through deduplication
+
+**timeline**
+- Maps every timestamp to frames and transcriptions
+- Links to unique_frames table
+- Tracks similarity scores for scene detection
 
 **transcriptions**
 - Stores text from audio transcription
 - Time ranges in UTC
 - Includes confidence and language
 
-### Future Tables
+### Deduplication Strategy
 
-**frame_analysis**
-- Results from vision models
-- Descriptions, objects detected, etc.
-
-**transcript_analysis**
-- Summaries, topics, entities
-- Semantic analysis results
+```sql
+-- Perceptual hashing enables efficient deduplication
+SELECT COUNT(*) as total_references,
+       COUNT(DISTINCT frame_id) as unique_frames,
+       (1 - COUNT(DISTINCT frame_id)::FLOAT / COUNT(*))*100 as dedup_percentage
+FROM timeline;
+-- Typical result: 95% deduplication
+```
 
 ## Processing Pipeline
 
@@ -88,61 +139,120 @@ parse_video_timestamp("2025-08-22_14-30-45.mp4")
 # Returns: datetime(2025, 8, 22, 14, 30, 45, tzinfo=UTC)
 ```
 
-### 2. Frame Extraction
+### 2. Frame Extraction & Deduplication
 - Default: 1 frame every 5 seconds
 - Converts to JPEG (quality 85)
-- Stores as BLOB with UTC timestamp
+- Generates perceptual hash (dhash)
+- Compares with previous frame (95% similarity threshold)
+- Stores unique frames only
 
 ### 3. Audio Transcription
 - Chunks audio into 5-minute segments
 - Uses OpenAI Whisper (base model default)
 - Stores with start/end UTC timestamps
+- Includes confidence scores
 
 ## Configuration
 
-Currently hardcoded, planned config.yaml:
+Via `config.yaml`:
 ```yaml
+database:
+  path: "mem.duckdb"
+
 capture:
-  frame_interval: 5      # seconds
-  chunk_duration: 300    # 5 minutes
-  image_quality: 85      # JPEG quality
+  frame:
+    interval_seconds: 5      # Frame extraction interval
+    jpeg_quality: 85         # JPEG compression quality
+  audio:
+    chunk_duration_seconds: 300  # 5-minute chunks
 
 whisper:
   model: "base"
   language: "auto"
 
-storage:
-  database_path: "mem.db"
-  max_image_size: 5242880  # 5MB
+api:
+  host: "0.0.0.0"
+  port: 8000
+  max_upload_size: 5368709120  # 5GB
 ```
 
 ## Separation of Concerns
 
-### Capture Layer (Current)
+### API Layer
+- REST endpoints for all operations
+- Request validation
+- Response formatting
+- Error handling
+
+### Service Layer
+- Business logic
+- Job management
+- Query orchestration
+- Format conversion
+
+### Capture Layer
 - Extract frames and audio
 - Store raw data with timestamps
 - No analysis or interpretation
+- Perceptual hashing for deduplication
+
+### Storage Layer
+- DuckDB for time-series optimization
+- BLOB storage for frames
+- Efficient temporal queries
+- Statistics and aggregations
 
 ### Processing Layer (Future)
 - Read stored frames/transcriptions
 - Apply vision/language models
 - Store analysis results separately
 
-### API Layer (Planned)
-- REST endpoints for queries
-- Time-based data retrieval
-- Trigger processing jobs
+## Performance Characteristics
 
-## Performance Considerations
-
-- **Frame Storage**: ~100-200KB per frame (JPEG quality 85)
-- **5-second intervals**: 720 frames per hour = ~100MB
+### Storage Efficiency
+- **Raw Storage**: ~100-200KB per frame (JPEG quality 85)
+- **After Deduplication**: ~5-10KB per frame (95% reduction)
+- **5-second intervals**: 720 frames/hour = ~5-10MB (vs 100MB raw)
 - **Transcription**: Minimal storage, high value
-- **Database Growth**: ~2.4GB per 24 hours of video
+- **Database Growth**: ~120MB per 24 hours (vs 2.4GB raw)
+
+### Query Performance
+- **DuckDB Advantages**:
+  - Columnar storage for fast aggregations
+  - Native time-series functions (TIME_BUCKET)
+  - Efficient BLOB handling
+  - Parallel query execution
+
+### API Performance
+- **Async Processing**: Non-blocking video capture
+- **In-Memory Jobs**: Fast job status tracking
+- **Image Caching**: Browser cache for frames
+- **Pagination**: Efficient large dataset handling
 
 ## Security & Privacy
 
 - All data stored locally
 - No cloud dependencies for capture
-- Optional AI processing can be local (Ollama) or cloud
+- No authentication (current version)
 - Database can be encrypted at filesystem level
+- Whisper runs locally (no API calls)
+
+## Future Enhancements
+
+### Streaming Support
+- RTMP ingestion for OBS
+- WebRTC for browser capture
+- Real-time frame processing
+- Live transcription
+
+### Analysis Pipeline
+- Vision model integration (CLIP, YOLO)
+- Semantic search on visual content
+- Scene understanding
+- Activity detection
+
+### Scalability
+- Distributed processing
+- S3-compatible storage
+- PostgreSQL option
+- Horizontal scaling

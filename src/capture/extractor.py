@@ -1,14 +1,16 @@
 """Frame extraction and timestamp parsing for video files."""
 
+import logging
 import re
+from collections.abc import Generator
+from datetime import datetime
+from io import BytesIO
+from pathlib import Path
+from typing import Optional
+
 import cv2
 import numpy as np
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Generator, Tuple, Optional
-from io import BytesIO
 from PIL import Image
-import logging
 
 from src.config import config
 
@@ -23,7 +25,7 @@ def parse_video_timestamp(filename: str) -> datetime:
         filename: Video filename in format YYYY-MM-DD_HH-MM-SS.mp4
 
     Returns:
-        UTC datetime parsed from filename
+        Local datetime parsed from filename
 
     Raises:
         ValueError: If filename doesn't match expected format
@@ -42,7 +44,7 @@ def parse_video_timestamp(filename: str) -> datetime:
 
     year, month, day, hour, minute, second = map(int, match.groups())
 
-    # Create datetime in UTC
+    # Create datetime in local timezone
     return datetime(year, month, day, hour, minute, second)
 
 
@@ -119,7 +121,7 @@ def frame_to_jpeg(frame: np.ndarray, quality: int = None) -> bytes:
 
 def extract_frames(
     video_path: Path, interval: int = None, quality: int = None
-) -> Generator[Tuple[float, bytes], None, None]:
+) -> Generator[tuple[float, bytes], None, None]:
     """
     Extract frames from video at specified intervals.
 
@@ -210,19 +212,24 @@ def extract_audio(video_path: Path, output_path: Optional[Path] = None) -> Path:
     return output_path
 
 
-def get_audio_chunks(audio_path: Path, chunk_duration: int = None) -> Generator[dict, None, None]:
+def get_audio_chunks(
+    audio_path: Path, chunk_duration: int = None, overlap_seconds: int = None
+) -> Generator[dict, None, None]:
     """
-    Split audio into chunks for processing.
+    Split audio into chunks for processing with optional overlap.
 
     Args:
         audio_path: Path to audio file
         chunk_duration: Duration of each chunk in seconds (uses config default if None)
+        overlap_seconds: Overlap between chunks in seconds (uses config default if None)
 
     Yields:
-        Dictionary with chunk information
+        Dictionary with chunk information including overlap metadata
     """
     if chunk_duration is None:
         chunk_duration = config.capture.audio.chunk_duration_seconds
+    if overlap_seconds is None:
+        overlap_seconds = getattr(config.capture.audio, "overlap_seconds", 0)
 
     import wave
 
@@ -230,16 +237,38 @@ def get_audio_chunks(audio_path: Path, chunk_duration: int = None) -> Generator[
         sample_rate = wav.getframerate()
         total_frames = wav.getnframes()
         chunk_frames = int(sample_rate * chunk_duration)
+        overlap_frames = int(sample_rate * overlap_seconds)
+
+        # Calculate step size (how much to advance between chunks)
+        step_frames = chunk_frames - overlap_frames
+        if step_frames <= 0:
+            step_frames = chunk_frames  # Fallback if overlap is too large
 
         start_frame = 0
         chunk_index = 0
 
         while start_frame < total_frames:
+            # Calculate actual chunk boundaries
             end_frame = min(start_frame + chunk_frames, total_frames)
 
             # Read chunk
             wav.setpos(start_frame)
             frames = wav.readframes(end_frame - start_frame)
+
+            # Calculate overlap boundaries for this chunk
+            has_overlap_before = chunk_index > 0 and overlap_seconds > 0
+            has_overlap_after = end_frame < total_frames and overlap_seconds > 0
+
+            overlap_start = None
+            overlap_end = None
+
+            if has_overlap_before:
+                # This chunk overlaps with the previous one
+                overlap_start = start_frame / sample_rate
+
+            if has_overlap_after:
+                # This chunk will overlap with the next one
+                overlap_end = (end_frame - overlap_frames) / sample_rate
 
             yield {
                 "index": chunk_index,
@@ -247,7 +276,11 @@ def get_audio_chunks(audio_path: Path, chunk_duration: int = None) -> Generator[
                 "end_seconds": end_frame / sample_rate,
                 "audio_data": frames,
                 "sample_rate": sample_rate,
+                "has_overlap": has_overlap_before or has_overlap_after,
+                "overlap_start_seconds": overlap_start,
+                "overlap_end_seconds": overlap_end,
             }
 
-            start_frame = end_frame
+            # Move to next chunk start position (with overlap)
+            start_frame += step_frames
             chunk_index += 1

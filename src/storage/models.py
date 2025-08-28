@@ -1,7 +1,8 @@
 """Pydantic models for database entities."""
 
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Any, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -9,42 +10,75 @@ class Source(BaseModel):
     """Represents a video/stream source."""
 
     id: Optional[int] = None
-    type: str = Field(..., pattern="^(video|stream|upload)$")
+    type: str = Field(..., pattern="^(video|stream|webcam)$")
     filename: str
+    location: Optional[str] = None  # 'front_door', 'office', etc.
+    device_id: Optional[str] = None  # Camera identifier
     start_timestamp: datetime
     end_timestamp: Optional[datetime] = None
-    duration_seconds: Optional[float] = None
-    frame_count: int = 0
     created_at: Optional[datetime] = None
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None  # Contains fps, width, height, duration, etc.
+
+    @property
+    def duration_seconds(self) -> Optional[float]:
+        """Computed duration in seconds."""
+        if self.end_timestamp and self.start_timestamp:
+            return (self.end_timestamp - self.start_timestamp).total_seconds()
+        return None
 
 
 class Frame(BaseModel):
-    """Represents an extracted video frame."""
+    """Represents a frame with optional perceptual hash deduplication."""
 
-    id: Optional[int] = None
+    frame_id: Optional[int] = None
+    source_id: int
+    first_seen_timestamp: datetime
+    last_seen_timestamp: datetime
+    perceptual_hash: str  # For similarity detection
+    image_data: bytes  # JPEG compressed image
+    metadata: Optional[dict[str, Any]] = None  # Contains jpeg_quality, processing params, etc.
+
+    @property
+    def size_bytes(self) -> int:
+        """Computed size of image data."""
+        return len(self.image_data) if self.image_data else 0
+
+
+class Timeline(BaseModel):
+    """Maps timestamps to frames and transcriptions."""
+
+    entry_id: Optional[int] = None
     source_id: int
     timestamp: datetime
-    image_data: bytes  # BLOB data
-    width: int
-    height: int
-    format: str = "jpeg"
-    size_bytes: Optional[int] = None
-    created_at: Optional[datetime] = None
+    frame_id: Optional[int] = None
+    transcription_id: Optional[int] = None
+    similarity_score: Optional[float] = 100.0  # 0-100, similarity to previous frame
+
+    @property
+    def scene_changed(self) -> bool:
+        """Computed scene change flag based on similarity score."""
+        return self.similarity_score < 95.0 if self.similarity_score is not None else False
 
 
 class Transcription(BaseModel):
-    """Represents an audio transcription."""
+    """Represents an audio transcription segment."""
 
-    id: Optional[int] = None
+    transcription_id: Optional[int] = None
     source_id: int
     start_timestamp: datetime
     end_timestamp: datetime
     text: str
     confidence: Optional[float] = None
     language: Optional[str] = None
-    word_count: Optional[int] = None
-    created_at: Optional[datetime] = None
+    whisper_model: str = "base"
+    has_overlap: bool = False  # Whether this chunk has overlap regions
+    overlap_start: Optional[datetime] = None  # Start of overlap with previous chunk
+    overlap_end: Optional[datetime] = None  # End of overlap with next chunk
+
+    @property
+    def word_count(self) -> int:
+        """Computed word count from text."""
+        return len(self.text.split()) if self.text else 0
 
 
 class FrameAnalysis(BaseModel):
@@ -54,7 +88,7 @@ class FrameAnalysis(BaseModel):
     frame_id: int
     model_name: str
     analysis_type: str
-    result: Dict[str, Any]
+    result: dict[str, Any]
     processing_time_ms: Optional[int] = None
     created_at: Optional[datetime] = None
 
@@ -66,9 +100,32 @@ class TranscriptAnalysis(BaseModel):
     transcription_id: int
     model_name: str
     analysis_type: str
-    result: Dict[str, Any]
+    result: dict[str, Any]
     processing_time_ms: Optional[int] = None
     created_at: Optional[datetime] = None
+
+
+class TimeframeAnnotation(BaseModel):
+    """Represents an annotation for a specific timeframe."""
+
+    annotation_id: Optional[int] = None
+    source_id: int
+    start_timestamp: datetime
+    end_timestamp: datetime
+    annotation_type: str = Field(
+        ...,
+        pattern="^(user_note|ai_summary|ocr_output|llm_query|scene_description|action_detected|custom)$",
+    )
+    content: str
+    metadata: Optional[dict[str, Any]] = None  # Confidence, model, tags, etc.
+    created_by: str = "system"
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    @property
+    def duration_seconds(self) -> float:
+        """Duration covered by this annotation."""
+        return (self.end_timestamp - self.start_timestamp).total_seconds()
 
 
 # Request/Response models for API
