@@ -46,19 +46,20 @@ def test_db():
 def sample_source():
     """Create sample source data."""
     return Source(
-        source_id=1,
+        id=1,
+        type="video",
         filename="2025-08-22_14-30-45.mp4",
-        location="/videos/test.mp4",
-        source_type="video",
+        location="office",
+        device_id="cam1",
         start_timestamp=datetime(2025, 8, 22, 14, 30, 45),
         end_timestamp=datetime(2025, 8, 22, 14, 35, 45),
-        duration_seconds=300.0,
         metadata={
             "fps": 30.0,
             "width": 1920,
             "height": 1080,
             "video_codec": "h264",
             "audio_codec": "aac",
+            "duration": 300.0,
         },
     )
 
@@ -80,7 +81,6 @@ def sample_frame():
         source_id=1,
         first_seen_timestamp=datetime(2025, 8, 22, 14, 30, 50),
         last_seen_timestamp=datetime(2025, 8, 22, 14, 31, 50),
-        reference_count=2,
         perceptual_hash="abc123def456",
         image_data=jpeg_bytes,
         metadata={"jpeg_quality": 85, "width": 100, "height": 100},
@@ -97,7 +97,6 @@ def sample_timeline():
         frame_id=1,
         transcription_id=1,
         similarity_score=98.5,
-        created_at=datetime.utcnow(),
     )
 
 
@@ -147,8 +146,8 @@ def populated_db(test_db, sample_source, sample_frame, sample_timeline, sample_t
     """Create a populated test database."""
     # Insert sample data
     source_id = test_db.create_source(sample_source)
-    frame_id = test_db.store_unique_frame(sample_frame)
-    trans_id = test_db.create_transcription(sample_transcription)
+    frame_id = test_db.store_frame(sample_frame)
+    trans_id = test_db.store_transcription(sample_transcription)
 
     # Create timeline entry linking everything
     test_db.connection.execute(

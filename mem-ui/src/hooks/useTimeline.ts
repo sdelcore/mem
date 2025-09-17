@@ -3,9 +3,15 @@ import { useQuery } from '@tanstack/react-query'
 interface TimelineData {
   id: string
   timestamp: string
+  source_id: number
+  source_type?: string
+  source_filename?: string
+  source_location?: string
+  source_device_id?: string
   frame?: {
     url: string
     hash?: string
+    source_id: number
   }
   transcript?: string
   annotations?: string[]
@@ -40,11 +46,17 @@ export const useTimeline = (
     const data = await response.json()
     // Map backend response to frontend format
     return (data.entries || []).map((entry: any) => ({
-      id: entry.frame?.frame_id || `${entry.timestamp}`,
+      id: entry.frame?.frame_id || `${entry.timestamp}_${entry.source_id}`,
       timestamp: entry.timestamp,
+      source_id: entry.source_id,
+      source_type: entry.source_type,
+      source_filename: entry.source_filename,
+      source_location: entry.source_location,
+      source_device_id: entry.source_device_id,
       frame: entry.frame ? {
         url: `${backendUrl}/api/search?type=frame&frame_id=${entry.frame.frame_id}`,
-        hash: entry.frame.perceptual_hash
+        hash: entry.frame.perceptual_hash,
+        source_id: entry.frame.source_id
       } : undefined,
       transcript: entry.transcript?.text,
       annotations: entry.annotations || []

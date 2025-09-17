@@ -3,8 +3,11 @@
 import logging
 import tempfile
 from datetime import datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional
+
+from PIL import Image
 
 from src.capture.extractor import (
     extract_audio,
@@ -416,31 +419,39 @@ class StreamCaptureProcessor:
         logger.info(f"Started stream capture with source ID {self.source_id}")
         return self.source_id
 
-    def capture_frame(self, frame_data: bytes, width: int, height: int):
+    def capture_frame(self, frame_data: bytes):
         """
         Capture a single frame from stream with deduplication.
+        Automatically detects frame dimensions from JPEG data.
 
         Args:
-            frame_data: JPEG frame data
-            width: Frame width
-            height: Frame height
+            frame_data: JPEG frame data (any resolution)
         """
         if not self.active or not self.source_id:
             raise RuntimeError("Stream not active")
 
         timestamp = datetime.now()
 
+        # Auto-detect dimensions from JPEG header
+        try:
+            img = Image.open(BytesIO(frame_data))
+            width, height = img.size
+        except Exception as e:
+            logger.error(f"Failed to parse frame dimensions: {e}")
+            return
+
         # Check if frame should be stored (deduplication)
-        should_store, perceptual_hash, similarity = self.deduplicator.should_store_frame(
+        should_store, perceptual_hash, similarity = self.frame_processor.should_store_frame(
             self.source_id, frame_data
         )
 
         frame_id = None
 
         if should_store:
-            # Create unique frame record
-            unique_frame = UniqueFrame(
+            # Create frame record
+            frame = Frame(
                 source_id=self.source_id,
+                timestamp=timestamp,
                 first_seen_timestamp=timestamp,
                 last_seen_timestamp=timestamp,
                 perceptual_hash=perceptual_hash,
@@ -448,13 +459,14 @@ class StreamCaptureProcessor:
                 metadata={
                     "width": width,
                     "height": height,
+                    "aspect_ratio": f"{width}:{height}",
                     "jpeg_quality": self.config.image_quality,
                 },
             )
 
-            # Store unique frame
-            frame_id = self.db.store_unique_frame(unique_frame)
-            logger.debug(f"Stored new frame {frame_id} at {timestamp}")
+            # Store frame
+            frame_id = self.db.store_frame(frame)
+            logger.debug(f"Stored new frame {frame_id} at {timestamp} ({width}x{height})")
         else:
             # Find existing frame with this hash
             frame_id = self.db.find_similar_frame(self.source_id, perceptual_hash)
@@ -480,11 +492,26 @@ class StreamCaptureProcessor:
             end_timestamp = datetime.now()
             source = self.db.get_source(self.source_id)
 
-            if source:
-                duration = (end_timestamp - source.start_timestamp).total_seconds()
+            if source and source.start_timestamp:
+                # Handle both naive and aware datetimes
+                start_ts = source.start_timestamp
+                if hasattr(start_ts, "tzinfo") and start_ts.tzinfo is not None:
+                    # start_timestamp is timezone-aware, make end_timestamp aware too
+                    import pytz
 
-                # Update source end timestamp
-                self.db.update_source_end(self.source_id, end_timestamp, duration)
+                    end_timestamp = datetime.now(pytz.UTC)
+                elif hasattr(end_timestamp, "tzinfo") and end_timestamp.tzinfo is not None:
+                    # end_timestamp is timezone-aware, make it naive
+                    end_timestamp = end_timestamp.replace(tzinfo=None)
+
+                try:
+                    duration = (end_timestamp - start_ts).total_seconds()
+                    # Update source end timestamp
+                    self.db.update_source_end(self.source_id, end_timestamp, duration)
+                except Exception as e:
+                    logger.error(f"Error calculating duration: {e}")
+                    # Just update the end timestamp without duration
+                    self.db.update_source_end(self.source_id, end_timestamp, 0)
 
                 # Reset frame processor for this source
                 self.frame_processor.reset_source(self.source_id)

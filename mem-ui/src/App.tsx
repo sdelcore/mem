@@ -5,6 +5,7 @@ import VideoUpload from './components/Upload/VideoUpload'
 import SearchBar from './components/Search/SearchBar'
 import ContentViewer from './components/Content/ContentViewer'
 import Sidebar from './components/Sidebar/Sidebar'
+import StreamManager from './components/Stream/StreamManager'
 import { useTimeline } from './hooks/useTimeline'
 
 function App() {
@@ -157,6 +158,7 @@ function App() {
                   onSearch={() => {}}
                   onResultClick={handleSearchResultClick}
                 />
+                <StreamManager />
                 <VideoUpload
                   onUploadSuccess={handleUploadSuccess}
                   onUploadError={(error) => console.error('Upload error:', error)}

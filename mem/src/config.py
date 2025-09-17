@@ -64,6 +64,37 @@ class APIConfig(BaseModel):
     default_time_range_days: int = 1
 
 
+class StreamingRTMPConfig(BaseModel):
+    """RTMP streaming configuration."""
+
+    enabled: bool = True
+    port: int = 1935
+    max_concurrent_streams: int = 10
+
+
+class StreamingCaptureConfig(BaseModel):
+    """Streaming capture configuration."""
+
+    frame_interval_seconds: int = 1
+    buffer_size: int = 30
+    max_frame_width: int = 7680
+    max_frame_height: int = 4320
+
+
+class StreamingAuthConfig(BaseModel):
+    """Streaming authentication configuration."""
+
+    require_stream_key: bool = True
+
+
+class StreamingConfig(BaseModel):
+    """Streaming configuration."""
+
+    rtmp: StreamingRTMPConfig = StreamingRTMPConfig()
+    capture: StreamingCaptureConfig = StreamingCaptureConfig()
+    auth: StreamingAuthConfig = StreamingAuthConfig()
+
+
 class LoggingConfig(BaseModel):
     """Logging configuration."""
 
@@ -80,6 +111,7 @@ class Config(BaseModel):
     whisper: WhisperConfig = WhisperConfig()
     files: FilesConfig = FilesConfig()
     api: APIConfig = APIConfig()
+    streaming: StreamingConfig = StreamingConfig()
     logging: LoggingConfig = LoggingConfig()
 
 
@@ -115,6 +147,7 @@ def load_config(path: Optional[Path] = None) -> Config:
             data = yaml.safe_load(f) or {}
 
         # Parse nested config structure
+        streaming_data = data.get("streaming", {})
         return Config(
             database=DatabaseConfig(**data.get("database", {})),
             capture=CaptureConfig(
@@ -124,6 +157,11 @@ def load_config(path: Optional[Path] = None) -> Config:
             whisper=WhisperConfig(**data.get("whisper", {})),
             files=FilesConfig(**data.get("files", {})),
             api=APIConfig(**data.get("api", {})),
+            streaming=StreamingConfig(
+                rtmp=StreamingRTMPConfig(**streaming_data.get("rtmp", {})),
+                capture=StreamingCaptureConfig(**streaming_data.get("capture", {})),
+                auth=StreamingAuthConfig(**streaming_data.get("auth", {})),
+            ),
             logging=LoggingConfig(**data.get("logging", {})),
         )
     else:

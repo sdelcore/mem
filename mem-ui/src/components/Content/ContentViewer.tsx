@@ -5,9 +5,13 @@ import { ChevronLeft, ChevronRight, Image, FileText, Tag, Clock, X, Maximize, Zo
 interface ContentItem {
   id: string
   timestamp: Date
+  source_id?: number
+  source_location?: string
+  source_type?: string
   frame?: {
     url: string
     hash?: string
+    source_id?: number
   }
   transcript?: string
   annotations?: string[]
@@ -17,6 +21,7 @@ interface ContentGroup {
   startIndex: number
   endIndex: number
   timestamp: Date
+  items: ContentItem[]  // All items at this timestamp
   frame?: {
     url: string
     hash?: string
@@ -63,6 +68,9 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
       .map((item) => ({
         id: item.id || Math.random().toString(),
         timestamp: new Date(item.timestamp),
+        source_id: item.source_id,
+        source_location: item.source_location,
+        source_type: item.source_type,
         frame: item.frame,
         transcript: item.transcript,
         annotations: item.annotations,
@@ -80,48 +88,34 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
       }
     }
 
-    // Group consecutive items with identical content
+    // Group items by timestamp to handle multiple sources
     const groups: ContentGroup[] = []
-    if (transformed.length > 0) {
-      let currentGroup: ContentGroup = {
-        startIndex: 0,
-        endIndex: 0,
-        timestamp: transformed[0].timestamp,
-        frame: transformed[0].frame,
-        transcript: transformed[0].transcript,
-        annotations: transformed[0].annotations,
+    const timestampGroups = new Map<number, ContentItem[]>()
+    
+    // Group items by timestamp
+    transformed.forEach((item) => {
+      const timeKey = item.timestamp.getTime()
+      if (!timestampGroups.has(timeKey)) {
+        timestampGroups.set(timeKey, [])
       }
-
-      for (let i = 1; i < transformed.length; i++) {
-        const item = transformed[i]
-        const prevItem = transformed[i - 1]
-        
-        // Check if content has changed
-        const frameChanged = item.frame?.hash !== prevItem.frame?.hash
-        const transcriptChanged = item.transcript !== prevItem.transcript
-        
-        if (frameChanged || transcriptChanged) {
-          // Save current group and start a new one
-          currentGroup.endIndex = i - 1
-          groups.push(currentGroup)
-          
-          currentGroup = {
-            startIndex: i,
-            endIndex: i,
-            timestamp: item.timestamp,
-            frame: item.frame,
-            transcript: item.transcript,
-            annotations: item.annotations,
-          }
-        } else {
-          // Extend current group
-          currentGroup.endIndex = i
-        }
+      timestampGroups.get(timeKey)!.push(item)
+    })
+    
+    // Convert to groups array
+    let index = 0
+    timestampGroups.forEach((items, timestamp) => {
+      const group: ContentGroup = {
+        startIndex: index,
+        endIndex: index + items.length - 1,
+        timestamp: new Date(timestamp),
+        items: items,
+        frame: items[0]?.frame,  // Use first item's frame as default
+        transcript: items.map(item => item.transcript).filter(Boolean).join(' | '),
+        annotations: items.flatMap(item => item.annotations || []),
       }
-      
-      // Don't forget the last group
-      groups.push(currentGroup)
-    }
+      groups.push(group)
+      index += items.length
+    })
 
     setContentItems(transformed)
     setContentGroups(groups)
@@ -268,40 +262,55 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
         </button>
       </div>
 
-      {currentItem && (
+      {currentGroup && (
         <div className="space-y-4">
-          {/* Frame/Image */}
-          {currentItem.frame && (
+          {/* Frames - show multiple if from different sources */}
+          {currentGroup.items.some(item => item.frame) && (
             <div className="bg-gray-100 rounded-lg overflow-hidden">
               <div className="flex items-center gap-2 px-4 py-2 bg-gray-200">
                 <Image className="w-4 h-4 text-gray-600" />
-                <span className="text-sm font-medium text-gray-700">Frame</span>
+                <span className="text-sm font-medium text-gray-700">
+                  {currentGroup.items.length > 1 ? `Frames (${currentGroup.items.length} sources)` : 'Frame'}
+                </span>
               </div>
               <div className="p-4">
-                {imageError ? (
-                  <div className="flex items-center justify-center h-64 text-gray-500">
-                    <div className="text-center">
-                      <Image className="w-12 h-12 mx-auto mb-2 text-gray-400" />
-                      <p>{imageError}</p>
+                {/* Grid layout for multiple frames */}
+                <div className={`grid gap-4 ${currentGroup.items.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  {currentGroup.items.filter(item => item.frame).map((item, idx) => (
+                    <div key={idx} className="space-y-2">
+                      {/* Source label */}
+                      {currentGroup.items.length > 1 && (
+                        <div className="text-xs text-gray-600 font-medium">
+                          {item.source_location || `Source ${item.source_id}`}
+                        </div>
+                      )}
+                      {imageError ? (
+                        <div className="flex items-center justify-center h-64 text-gray-500 bg-gray-50 rounded">
+                          <div className="text-center">
+                            <Image className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+                            <p>Frame unavailable</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="relative group">
+                          <img
+                            src={item.frame!.url}
+                            alt={`Frame at ${format(item.timestamp, 'HH:mm:ss')}`}
+                            onError={handleImageError}
+                            onClick={handleImageClick}
+                            className="w-full h-auto rounded-md border border-cream-100 cursor-pointer transition-opacity group-hover:opacity-90"
+                          />
+                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                            <div className="bg-black bg-opacity-50 rounded-full p-3">
+                              <Maximize className="w-6 h-6 text-white" />
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ) : (
-                  <div className="relative group">
-                    <img
-                      src={currentItem.frame.url}
-                      alt={`Frame at ${format(currentItem.timestamp, 'HH:mm:ss')}`}
-                      onError={handleImageError}
-                      onClick={handleImageClick}
-                      className="w-full h-auto rounded-md border border-cream-100 cursor-pointer transition-opacity group-hover:opacity-90"
-                    />
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                      <div className="bg-black bg-opacity-50 rounded-full p-3">
-                        <Maximize className="w-6 h-6 text-white" />
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {currentItem.frame.hash && (
+                  ))}
+                </div>
+                {currentItem?.frame?.hash && (
                   <p className="text-xs text-gray-500 mt-2">
                     Hash: {currentItem.frame.hash}
                   </p>

@@ -132,15 +132,14 @@ class Database:
 
     def update_source_end(self, source_id: int, end_timestamp: datetime, duration: float):
         """Update source end timestamp."""
-        with self.transaction() as conn:
-            conn.execute(
-                """
-                UPDATE sources
-                SET end_timestamp = ?
-                WHERE source_id = ?
-                """,
-                [end_timestamp, source_id],
-            )
+        self.connection.execute(
+            """
+            UPDATE sources
+            SET end_timestamp = ?
+            WHERE source_id = ?
+            """,
+            [end_timestamp, source_id],
+        )
 
     # Frame operations with deduplication
     def store_frame(self, frame: Frame) -> int:
@@ -618,6 +617,25 @@ class Database:
         }
 
         return stats
+
+    def get_source(self, source_id: int) -> Optional[Source]:
+        """Get a specific source by ID."""
+        result = self.connection.execute("SELECT * FROM sources WHERE source_id = ?", [source_id])
+
+        row = result.fetchone()
+        if row:
+            return Source(
+                id=row[0],
+                type=row[1],
+                filename=row[2],
+                location=row[3],
+                device_id=row[4],
+                start_timestamp=row[5],
+                end_timestamp=row[6],
+                metadata=json.loads(row[7]) if row[7] else None,
+                created_at=row[8],
+            )
+        return None
 
     def get_sources(self) -> list[Source]:
         """Get all sources."""

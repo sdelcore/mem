@@ -11,6 +11,7 @@ from typing import Any, Optional
 from PIL import Image
 
 from src.capture.pipeline import CaptureConfig, VideoCaptureProcessor
+from src.capture.stream_server import RTMPServer, StreamSession
 from src.config import config
 from src.storage.db import Database
 
@@ -118,7 +119,7 @@ class SearchService:
         Returns:
             Timeline entries with metadata
         """
-        # Get timeline entries from database
+        # Get timeline entries from database with source information
         query = """
         SELECT
             t.entry_id,
@@ -133,10 +134,16 @@ class SearchService:
             tr.confidence,
             tr.language,
             tr.start_timestamp,
-            tr.end_timestamp
+            tr.end_timestamp,
+            s.source_type,
+            s.filename,
+            s.location,
+            s.device_id,
+            s.metadata as source_metadata
         FROM timeline t
         LEFT JOIN frames f ON t.frame_id = f.frame_id
         LEFT JOIN transcriptions tr ON t.transcription_id = tr.transcription_id
+        LEFT JOIN sources s ON t.source_id = s.source_id
         WHERE t.timestamp >= ? AND t.timestamp <= ?
         """
 
@@ -167,6 +174,10 @@ class SearchService:
             entry = {
                 "timestamp": timestamp,
                 "source_id": row[1],
+                "source_type": row[13],  # source_type
+                "source_filename": row[14],  # filename
+                "source_location": row[15],  # location
+                "source_device_id": row[16],  # device_id
                 "scene_changed": row[5] < 95.0 if row[5] else False,
                 "annotations": [],  # Always include annotations array
             }
@@ -522,3 +533,111 @@ class AnnotationService:
         """Cleanup database connection."""
         if hasattr(self, "db"):
             self.db.disconnect()
+
+
+class StreamingService:
+    """Service for handling streaming operations."""
+
+    def __init__(self):
+        """Initialize streaming service with RTMP server."""
+        self.rtmp_server = RTMPServer(
+            port=config.streaming.rtmp.port,
+            max_streams=config.streaming.rtmp.max_concurrent_streams,
+        )
+
+    def create_stream(
+        self, name: Optional[str] = None, metadata: Optional[dict] = None
+    ) -> StreamSession:
+        """
+        Create a new stream session.
+
+        Args:
+            name: Optional stream name
+            metadata: Optional metadata
+
+        Returns:
+            StreamSession object
+        """
+        session = self.rtmp_server.create_session(stream_name=name)
+        if metadata:
+            # Store metadata in session (would need to extend StreamSession)
+            pass
+        return session
+
+    def start_stream(self, stream_key: str) -> bool:
+        """
+        Start receiving stream.
+
+        Args:
+            stream_key: Stream key to start
+
+        Returns:
+            True if started successfully
+        """
+        return self.rtmp_server.start_stream(stream_key)
+
+    def stop_stream(self, stream_key: str) -> bool:
+        """
+        Stop an active stream.
+
+        Args:
+            stream_key: Stream key to stop
+
+        Returns:
+            True if stopped successfully
+        """
+        return self.rtmp_server.stop_stream(stream_key)
+
+    def get_session(self, stream_key: str) -> Optional[StreamSession]:
+        """
+        Get a stream session by key.
+
+        Args:
+            stream_key: Stream key
+
+        Returns:
+            StreamSession or None
+        """
+        return self.rtmp_server.get_session(stream_key)
+
+    def get_all_sessions(self) -> list[StreamSession]:
+        """
+        Get all stream sessions.
+
+        Returns:
+            List of StreamSession objects
+        """
+        return self.rtmp_server.get_all_sessions()
+
+    def delete_session(self, stream_key: str) -> bool:
+        """
+        Delete a stream session.
+
+        Args:
+            stream_key: Stream key to delete
+
+        Returns:
+            True if deleted
+        """
+        return self.rtmp_server.delete_session(stream_key)
+
+    def get_rtmp_url(self, stream_key: str) -> str:
+        """
+        Get RTMP URL for a stream.
+
+        Args:
+            stream_key: Stream key
+
+        Returns:
+            RTMP URL string
+        """
+        return self.rtmp_server.get_stream_url(stream_key)
+
+    def get_status(self) -> dict[str, Any]:
+        """
+        Get streaming server status.
+
+        Returns:
+            Status dictionary
+        """
+        return self.rtmp_server.get_status()

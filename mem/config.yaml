@@ -17,7 +17,12 @@ whisper:
   model: base
   language: auto
   fallback_language: en
-  device: cpu
+  device: cuda  # cuda for GPU, cpu for CPU-only
+  compute_type: float16  # float16 for GPU, int8 for CPU (faster-whisper specific)
+  # Transcription quality settings
+  no_speech_threshold: 0.6
+  logprob_threshold: -1.0
+  detect_non_speech: true
 
 files:
   filename_format: YYYY-MM-DD_HH-MM-SS
@@ -28,6 +33,19 @@ api:
   port: 8000
   max_upload_size: 5368709120  # 5GB
   default_time_range_days: 1
+
+streaming:
+  rtmp:
+    enabled: true
+    port: 1935
+    max_concurrent_streams: 10
+  capture:
+    frame_interval_seconds: 1  # More frequent for live streams
+    buffer_size: 30  # seconds of buffer
+    max_frame_width: 7680  # 8K max (safety limit)
+    max_frame_height: 4320  # 8K max (safety limit)
+  auth:
+    require_stream_key: true
 
 logging:
   level: INFO

@@ -22,6 +22,7 @@ class TestCaptureService:
         """Test successful capture job creation."""
         with patch("src.api.services.VideoCaptureProcessor") as mock_processor:
             mock_processor.return_value.process_video.return_value = {
+                "status": "success",
                 "source_id": 1,
                 "frames_extracted": 50,
                 "frames_stored": 45,
@@ -32,29 +33,36 @@ class TestCaptureService:
 
             assert job_id is not None
             assert len(job_id) == 36  # UUID format
-            assert job_id in capture_service.JOBS
+            from src.api.services import JOBS
+
+            assert job_id in JOBS
 
             # Check job was processed
-            job = capture_service.JOBS[job_id]
+            job = JOBS[job_id]
             assert job["status"] == "completed"
             assert job["filepath"] == mock_video_file
             assert job["result"]["frames_extracted"] == 50
 
     def test_start_capture_with_config(self, capture_service, mock_video_file):
         """Test capture with custom configuration."""
-        config = {"frame_interval": 10, "jpeg_quality": 90}
+        config = {"frame_interval": 10, "chunk_duration": 300}
 
         with patch("src.api.services.CaptureConfig") as mock_config:
             with patch("src.api.services.VideoCaptureProcessor") as mock_processor:
                 mock_processor.return_value.process_video.return_value = {
+                    "status": "success",
                     "source_id": 1,
                     "frames_extracted": 30,
                 }
 
                 job_id = capture_service.start_capture(mock_video_file, config)
 
-                # Verify config was passed
-                mock_config.assert_called_with(frame_interval=10, jpeg_quality=90)
+                # Verify config was created
+                mock_config.assert_called_once()
+                # Verify attributes were set on the config instance
+                cfg_instance = mock_config.return_value
+                assert cfg_instance.frame_interval == 10
+                assert cfg_instance.chunk_duration == 300
 
     def test_start_capture_failure(self, capture_service, mock_video_file):
         """Test capture job failure handling."""
@@ -64,7 +72,9 @@ class TestCaptureService:
             job_id = capture_service.start_capture(mock_video_file)
 
             # Check job marked as failed
-            job = capture_service.JOBS[job_id]
+            from src.api.services import JOBS
+
+            job = JOBS[job_id]
             assert job["status"] == "failed"
             assert job["error"] == "Processing failed"
             assert job["completed_at"] is not None
@@ -72,8 +82,10 @@ class TestCaptureService:
     def test_get_job_status_exists(self, capture_service):
         """Test retrieving existing job status."""
         # Manually create a job
+        from src.api.services import JOBS
+
         job_id = str(uuid.uuid4())
-        capture_service.JOBS[job_id] = {
+        JOBS[job_id] = {
             "job_id": job_id,
             "status": "processing",
             "filepath": "/test/video.mp4",

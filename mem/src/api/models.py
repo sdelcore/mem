@@ -17,6 +17,48 @@ class CaptureRequest(BaseModel):
     )
 
 
+# Stream models
+
+
+class CreateStreamRequest(BaseModel):
+    """Request to create a new stream session."""
+
+    name: Optional[str] = Field(default=None, description="Optional stream name")
+    metadata: Optional[dict[str, Any]] = Field(default=None, description="Optional metadata")
+
+
+class StreamSessionResponse(BaseModel):
+    """Response containing stream session details."""
+
+    session_id: str
+    stream_key: str
+    name: Optional[str] = None
+    status: Literal["waiting", "live", "ended", "error"]
+    source_id: Optional[int] = None
+    rtmp_url: str
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    resolution: Optional[str] = None
+    frames_received: int = 0
+    frames_stored: int = 0
+    duration: Optional[float] = None
+
+
+class StreamListResponse(BaseModel):
+    """Response containing list of stream sessions."""
+
+    streams: list[StreamSessionResponse]
+    active_count: int
+    total_count: int
+
+
+class StreamStatusResponse(BaseModel):
+    """Response containing streaming server status."""
+
+    server: dict[str, Any]
+    streams: dict[str, Any]
+
+
 class SearchRequest(BaseModel):
     """Generic search request parameters."""
 

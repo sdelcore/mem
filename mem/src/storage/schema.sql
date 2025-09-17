@@ -144,6 +144,34 @@ LEFT JOIN frames f ON t.frame_id = f.frame_id
 GROUP BY s.source_id, s.filename, s.location;
 
 -- ============================================================================
+-- STREAMING SESSIONS
+-- ============================================================================
+
+-- Stream sessions for tracking live streams from OBS
+CREATE SEQUENCE IF NOT EXISTS stream_sessions_seq START 1;
+CREATE TABLE IF NOT EXISTS stream_sessions (
+    session_id INTEGER PRIMARY KEY DEFAULT nextval('stream_sessions_seq'),
+    source_id BIGINT REFERENCES sources(source_id),
+    stream_key VARCHAR(64) UNIQUE NOT NULL,
+    stream_name VARCHAR(255),
+    status VARCHAR(20) NOT NULL CHECK (status IN ('waiting', 'live', 'ended', 'error')),
+    started_at TIMESTAMP,
+    ended_at TIMESTAMP,
+    stream_width INTEGER,
+    stream_height INTEGER,
+    stream_fps REAL,
+    stream_bitrate INTEGER,
+    frames_received INTEGER DEFAULT 0,
+    frames_stored INTEGER DEFAULT 0,
+    metadata JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for stream status queries
+CREATE INDEX IF NOT EXISTS idx_stream_sessions_status ON stream_sessions(status);
+CREATE INDEX IF NOT EXISTS idx_stream_sessions_stream_key ON stream_sessions(stream_key);
+
+-- ============================================================================
 -- ANNOTATIONS FOR TIMEFRAMES
 -- ============================================================================
 

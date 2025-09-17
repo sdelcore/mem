@@ -47,6 +47,10 @@ const Timeline: React.FC<TimelineProps> = ({
     const hasFrame = segmentData.some(item => item.frame)
     const hasTranscript = segmentData.some(item => item.transcript)
     const hasAnnotation = segmentData.some(item => item.annotations?.length > 0)
+    
+    // Track unique sources in this segment
+    const uniqueSources = new Set(segmentData.map(item => item.source_id))
+    const sourceCount = uniqueSources.size
 
     return {
       start: segmentStart,
@@ -55,6 +59,8 @@ const Timeline: React.FC<TimelineProps> = ({
       hasTranscript,
       hasAnnotation,
       data: segmentData,
+      sourceCount,
+      sources: Array.from(uniqueSources),
     }
   })
 

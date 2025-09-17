@@ -1,7 +1,5 @@
-"""Audio transcription using Whisper."""
+"""Audio transcription using Faster-Whisper."""
 
-import builtins
-import contextlib
 import logging
 import tempfile
 import wave
@@ -9,69 +7,46 @@ from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
+from faster_whisper import WhisperModel
 
 from src.config import config
-
-try:
-    import os
-    import ssl
-
-    import whisper
-
-    # Handle SSL certificate issues for model downloads
-    if os.environ.get("PYTHONHTTPSVERIFY", "1") == "0":
-        ssl._create_default_https_context = ssl._create_unverified_context
-
-    WHISPER_AVAILABLE = True
-except ImportError:
-    WHISPER_AVAILABLE = False
-    whisper = None
 
 logger = logging.getLogger(__name__)
 
 
 class Transcriber:
-    """Handles audio transcription using Whisper."""
+    """Handles audio transcription using Faster-Whisper."""
 
-    def __init__(self, model_name: str = None, device: str = None):
+    def __init__(self, model_name: str = None, device: str = None, compute_type: str = None):
         """
-        Initialize transcriber.
+        Initialize transcriber with Faster-Whisper.
 
         Args:
             model_name: Whisper model size (uses config default if None)
-            device: Device to use (uses config default if None)
+            device: Device to use - "cuda" or "cpu" (uses config default if None)
+            compute_type: Compute type - "float16", "int8", "int8_float16" (uses config default if None)
         """
-        if not WHISPER_AVAILABLE:
-            raise RuntimeError("Whisper is not installed. Run: pip install openai-whisper")
-
         self.model_name = model_name or config.whisper.model
         self.device = device or config.whisper.device
+        # Faster-whisper specific: compute type for quantization
+        self.compute_type = compute_type or getattr(config.whisper, "compute_type", "float16")
         self.model = None
 
     def load_model(self):
-        """Load the Whisper model."""
+        """Load the Faster-Whisper model."""
         if self.model is None:
-            logger.info(f"Loading Whisper model: {self.model_name}")
+            logger.info(f"Loading Faster-Whisper model: {self.model_name}")
 
-            # Temporarily disable SSL verification for model download if needed
-            import ssl
-            import urllib.request
-
-            original_context = None
-            try:
-                original_context = urllib.request.ssl._create_default_https_context
-                urllib.request.ssl._create_default_https_context = ssl._create_unverified_context
-            except Exception:
-                pass
-
-            try:
-                self.model = whisper.load_model(self.model_name, device=self.device)
-                logger.info("Whisper model loaded successfully")
-            finally:
-                # Restore original SSL context if it was changed
-                if original_context:
-                    with contextlib.suppress(builtins.BaseException):
-                        urllib.request.ssl._create_default_https_context = original_context
+            # Faster-whisper uses different initialization
+            # Models are downloaded to ~/.cache/huggingface by default
+            self.model = WhisperModel(
+                self.model_name,
+                device=self.device,
+                compute_type=self.compute_type,
+                cpu_threads=4,  # Number of threads when running on CPU
+                num_workers=1,  # Number of workers for preprocessing
+            )
+            logger.info(f"Faster-Whisper model loaded successfully on {self.device}")
 
     def transcribe_audio(self, audio_path: Path, language: Optional[str] = None) -> dict[str, Any]:
         """
@@ -92,34 +67,79 @@ class Transcriber:
         language = "en"
         logger.info("Forcing English language for transcription")
 
-        # Transcribe with settings that help detect non-speech
-        result = self.model.transcribe(
+        # Transcribe with Faster-Whisper
+        # Returns generator of segments and info dict
+        segments_generator, info = self.model.transcribe(
             str(audio_path),
             language=language,
-            verbose=False,
+            beam_size=5,
+            best_of=5,
+            patience=1,
+            length_penalty=1,
+            temperature=0,
+            compression_ratio_threshold=2.4,
+            log_prob_threshold=config.whisper.logprob_threshold,
             no_speech_threshold=config.whisper.no_speech_threshold,
-            logprob_threshold=config.whisper.logprob_threshold,
+            condition_on_previous_text=True,
+            initial_prompt=None,
+            prefix=None,
+            suppress_blank=True,
+            suppress_tokens=[-1],
+            without_timestamps=False,
+            max_initial_timestamp=1.0,
+            word_timestamps=False,
+            prepend_punctuations='"\'"¿([{-',
+            append_punctuations='"\'.。,，!！?？:：")]}、',
+            vad_filter=True,  # Voice Activity Detection filter
+            vad_parameters=dict(
+                threshold=0.5,
+                min_speech_duration_ms=250,
+                max_speech_duration_s=float("inf"),
+                min_silence_duration_ms=2000,
+                window_size_samples=1024,
+                speech_pad_ms=400,
+            ),
         )
+
+        # Convert generator to list and extract text
+        segments_list = []
+        full_text = []
+
+        for segment in segments_generator:
+            segment_dict = {
+                "start": segment.start,
+                "end": segment.end,
+                "text": segment.text.strip(),
+                "no_speech_prob": segment.no_speech_prob,
+                "avg_logprob": segment.avg_logprob,
+                "compression_ratio": segment.compression_ratio,
+            }
+            segments_list.append(segment_dict)
+            full_text.append(segment.text.strip())
+
+        combined_text = " ".join(full_text).strip()
 
         # Check if it's non-speech audio
         if config.whisper.detect_non_speech:
-            is_non_speech, audio_type = self.detect_non_speech_audio(result)
+            is_non_speech, audio_type = self.detect_non_speech_audio(
+                {"text": combined_text, "segments": segments_list}
+            )
 
             if is_non_speech:
                 logger.info(f"Non-speech audio detected ({audio_type}): {audio_path}")
                 return {
                     "text": audio_type,
-                    "language": result.get("language", language),
+                    "language": info.language if info else language,
                     "segments": [{"text": audio_type, "start": 0, "end": 0}],
                     "is_non_speech": True,
                     "audio_type": audio_type,
-                    "original_text": result.get("text", ""),  # Keep for debugging
+                    "original_text": combined_text,  # Keep for debugging
                 }
 
         return {
-            "text": result["text"].strip(),
-            "language": result.get("language", language),
-            "segments": result.get("segments", []),
+            "text": combined_text,
+            "language": info.language if info else language,
+            "segments": segments_list,
             "is_non_speech": False,
         }
 
@@ -178,26 +198,44 @@ class Transcriber:
 
         logger.info(f"Transcribing with timestamps: {audio_path}")
 
-        # Transcribe with timestamps
-        result = self.model.transcribe(
-            str(audio_path), language=language, verbose=False, word_timestamps=True
+        # Transcribe with word timestamps enabled
+        segments_generator, info = self.model.transcribe(
+            str(audio_path),
+            language=language,
+            word_timestamps=True,  # Enable word-level timestamps
+            vad_filter=True,
         )
 
         # Extract segments with timing
         segments = []
-        for segment in result.get("segments", []):
+        full_text = []
+
+        for segment in segments_generator:
+            words = []
+            if segment.words:
+                words = [
+                    {
+                        "start": word.start,
+                        "end": word.end,
+                        "word": word.word,
+                        "probability": word.probability,
+                    }
+                    for word in segment.words
+                ]
+
             segments.append(
                 {
-                    "start": segment["start"],
-                    "end": segment["end"],
-                    "text": segment["text"].strip(),
-                    "words": segment.get("words", []),
+                    "start": segment.start,
+                    "end": segment.end,
+                    "text": segment.text.strip(),
+                    "words": words,
                 }
             )
+            full_text.append(segment.text.strip())
 
         return {
-            "text": result["text"].strip(),
-            "language": result.get("language", language),
+            "text": " ".join(full_text).strip(),
+            "language": info.language if info else language,
             "segments": segments,
         }
 
@@ -213,21 +251,27 @@ class Transcriber:
         """
         self.load_model()
 
-        # Load audio
-        audio = whisper.load_audio(str(audio_path))
-        audio = whisper.pad_or_trim(audio)
+        # Faster-whisper language detection
+        # Transcribe a short segment to detect language
+        segments, info = self.model.transcribe(
+            str(audio_path),
+            beam_size=1,
+            best_of=1,
+            temperature=0,
+            without_timestamps=True,
+            max_initial_timestamp=10.0,  # Only analyze first 10 seconds
+            condition_on_previous_text=False,
+        )
 
-        # Make log-Mel spectrogram
-        mel = whisper.log_mel_spectrogram(audio).to(self.model.device)
+        # Get detected language from info
+        detected_language = info.language if info else "unknown"
+        language_probability = info.language_probability if info else 0.0
 
-        # Detect language
-        _, probs = self.model.detect_language(mel)
+        logger.info(
+            f"Detected language: {detected_language} (confidence: {language_probability:.2f})"
+        )
 
-        # Get most likely language
-        language = max(probs, key=probs.get)
-        logger.info(f"Detected language: {language} (confidence: {probs[language]:.2f})")
-
-        return language
+        return detected_language
 
     def calculate_confidence(self, segments: list) -> float:
         """
@@ -244,23 +288,17 @@ class Transcriber:
 
         # Calculate average probability from segments
         total_prob = 0
-        total_tokens = 0
+        total_segments = 0
 
         for segment in segments:
             if "avg_logprob" in segment:
                 # Convert log probability to probability
                 prob = np.exp(segment["avg_logprob"])
-                # tokens might be a list, so get its length
-                tokens = segment.get("tokens", [])
-                if isinstance(tokens, list):
-                    num_tokens = len(tokens)
-                else:
-                    num_tokens = int(tokens) if tokens else 1
-                total_prob += prob * num_tokens
-                total_tokens += num_tokens
+                total_prob += prob
+                total_segments += 1
 
-        if total_tokens > 0:
-            return min(total_prob / total_tokens, 1.0)
+        if total_segments > 0:
+            return min(total_prob / total_segments, 1.0)
         return 0.5  # Default confidence
 
     def detect_non_speech_audio(self, result: dict) -> tuple[bool, str]:

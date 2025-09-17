@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  mem-backend:
+    image: registry.sdelcore.com/mem/backend:latest
+    build:
+      context: ./mem
+      dockerfile: Dockerfile
+    container_name: mem-backend
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=0
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTHONUNBUFFERED=1
+      - MEM_CONFIG_PATH=/app/config/config.yaml
+    volumes:
+      - ./data/db:/data/db
+      - ./data/uploads:/data/uploads
+      - ./data/config:/app/config:ro
+      - whisper-models:/home/memuser/.cache/huggingface
+    ports:
+      - "8000:8000"
+    networks:
+      - mem-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  mem-frontend:
+    image: registry.sdelcore.com/mem/frontend:latest
+    build:
+      context: ./mem-ui
+      dockerfile: Dockerfile
+    container_name: mem-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    networks:
+      - mem-network
+    depends_on:
+      - mem-backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  mem-rtmp:
+    image: registry.sdelcore.com/mem/rtmp:latest
+    build:
+      context: ./rtmp
+      dockerfile: Dockerfile
+    container_name: mem-rtmp
+    restart: unless-stopped
+    ports:
+      - "1935:1935"
+    networks:
+      - mem-network
+    depends_on:
+      - mem-backend
+    volumes:
+      - ./data/streams:/data/streams
+    environment:
+      - BACKEND_URL=http://mem-backend:8000
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "1935"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+networks:
+  mem-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  whisper-models:
+    driver: local

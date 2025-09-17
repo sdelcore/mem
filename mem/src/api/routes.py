@@ -18,16 +18,25 @@ from src.api.models import (
     CaptureRequest,
     CaptureResponse,
     CreateAnnotationRequest,
+    CreateStreamRequest,
     FrameData,
     SearchResponse,
     StatusResponse,
+    StreamListResponse,
+    StreamSessionResponse,
+    StreamStatusResponse,
     TimelineEntry,
     TimelineResponse,
     TranscriptData,
     TranscriptSearchResponse,
     UpdateAnnotationRequest,
 )
-from src.api.services import AnnotationService, CaptureService, SearchService
+from src.api.services import (
+    AnnotationService,
+    CaptureService,
+    SearchService,
+    StreamingService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +47,7 @@ router = APIRouter()
 capture_service = CaptureService()
 search_service = SearchService()
 annotation_service = AnnotationService()
+streaming_service = StreamingService()
 
 
 @router.post("/capture", response_model=CaptureResponse)
@@ -469,4 +479,205 @@ async def batch_create_annotations(request: BatchAnnotationRequest):
 
     except Exception as e:
         logger.error(f"Batch create annotations failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Stream endpoints
+@router.post("/streams/create", response_model=StreamSessionResponse)
+async def create_stream(request: CreateStreamRequest):
+    """Create a new stream session for OBS Studio.
+
+    Args:
+        request: Stream creation request
+
+    Returns:
+        Stream session details including RTMP URL
+    """
+    try:
+        session = streaming_service.create_stream(name=request.name, metadata=request.metadata)
+
+        return StreamSessionResponse(
+            session_id=session.session_id,
+            stream_key=session.stream_key,
+            name=session.stream_name,
+            status=session.status,
+            source_id=session.source_id,
+            rtmp_url=streaming_service.get_rtmp_url(session.stream_key),
+            started_at=session.started_at,
+            ended_at=session.ended_at,
+            resolution=f"{session.width}x{session.height}" if session.width else None,
+            frames_received=session.frames_received,
+            frames_stored=session.frames_stored,
+            duration=(
+                (datetime.now() - session.started_at).total_seconds()
+                if session.started_at and session.status == "live"
+                else None
+            ),
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Create stream failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/streams", response_model=StreamListResponse)
+async def list_streams():
+    """List all stream sessions.
+
+    Returns:
+        List of all stream sessions with their status
+    """
+    try:
+        sessions = streaming_service.get_all_sessions()
+        active_count = sum(1 for s in sessions if s.status == "live")
+
+        stream_responses = []
+        for session in sessions:
+            stream_responses.append(
+                StreamSessionResponse(
+                    session_id=session.session_id,
+                    stream_key=session.stream_key,
+                    name=session.stream_name,
+                    status=session.status,
+                    source_id=session.source_id,
+                    rtmp_url=streaming_service.get_rtmp_url(session.stream_key),
+                    started_at=session.started_at,
+                    ended_at=session.ended_at,
+                    resolution=(f"{session.width}x{session.height}" if session.width else None),
+                    frames_received=session.frames_received,
+                    frames_stored=session.frames_stored,
+                    duration=(
+                        (datetime.now() - session.started_at).total_seconds()
+                        if session.started_at and session.status == "live"
+                        else None
+                    ),
+                )
+            )
+
+        return StreamListResponse(
+            streams=stream_responses,
+            active_count=active_count,
+            total_count=len(sessions),
+        )
+    except Exception as e:
+        logger.error(f"List streams failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/streams/{stream_key}", response_model=StreamSessionResponse)
+async def get_stream(stream_key: str):
+    """Get details for a specific stream session.
+
+    Args:
+        stream_key: Stream key identifier
+
+    Returns:
+        Stream session details
+    """
+    try:
+        session = streaming_service.get_session(stream_key)
+        if not session:
+            raise HTTPException(status_code=404, detail=f"Stream {stream_key} not found")
+
+        return StreamSessionResponse(
+            session_id=session.session_id,
+            stream_key=session.stream_key,
+            name=session.stream_name,
+            status=session.status,
+            source_id=session.source_id,
+            rtmp_url=streaming_service.get_rtmp_url(session.stream_key),
+            started_at=session.started_at,
+            ended_at=session.ended_at,
+            resolution=f"{session.width}x{session.height}" if session.width else None,
+            frames_received=session.frames_received,
+            frames_stored=session.frames_stored,
+            duration=(
+                (datetime.now() - session.started_at).total_seconds()
+                if session.started_at and session.status == "live"
+                else None
+            ),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get stream failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/streams/{stream_key}/start")
+async def start_stream(stream_key: str):
+    """Start receiving stream from OBS Studio.
+
+    Args:
+        stream_key: Stream key to start
+
+    Returns:
+        Success status
+    """
+    try:
+        success = streaming_service.start_stream(stream_key)
+        if not success:
+            raise HTTPException(status_code=400, detail="Failed to start stream")
+
+        return {"message": f"Stream {stream_key} started successfully"}
+    except Exception as e:
+        logger.error(f"Start stream failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/streams/{stream_key}/stop")
+async def stop_stream(stream_key: str):
+    """Stop an active stream.
+
+    Args:
+        stream_key: Stream key to stop
+
+    Returns:
+        Success status
+    """
+    try:
+        success = streaming_service.stop_stream(stream_key)
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Stream {stream_key} not found")
+
+        return {"message": f"Stream {stream_key} stopped successfully"}
+    except Exception as e:
+        logger.error(f"Stop stream failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/streams/{stream_key}")
+async def delete_stream(stream_key: str):
+    """Delete a stream session.
+
+    Args:
+        stream_key: Stream key to delete
+
+    Returns:
+        Success status
+    """
+    try:
+        success = streaming_service.delete_session(stream_key)
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Stream {stream_key} not found")
+
+        return {"message": f"Stream {stream_key} deleted successfully"}
+    except Exception as e:
+        logger.error(f"Delete stream failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/streams/status", response_model=StreamStatusResponse)
+async def get_streaming_status():
+    """Get overall streaming server status.
+
+    Returns:
+        Server and stream statistics
+    """
+    try:
+        status = streaming_service.get_status()
+        return StreamStatusResponse(server=status["server"], streams=status["streams"])
+    except Exception as e:
+        logger.error(f"Get streaming status failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
