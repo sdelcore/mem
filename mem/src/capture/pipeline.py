@@ -48,8 +48,12 @@ class CaptureConfig:
             whisper_model: Whisper model size (uses config default if None)
             whisper_language: Language for transcription or "auto" (uses config default if None)
         """
-        self.frame_interval = frame_interval or app_config.capture.frame.interval_seconds
-        self.chunk_duration = chunk_duration or app_config.capture.audio.chunk_duration_seconds
+        self.frame_interval = (
+            frame_interval or app_config.capture.frame.interval_seconds
+        )
+        self.chunk_duration = (
+            chunk_duration or app_config.capture.audio.chunk_duration_seconds
+        )
         self.overlap_seconds = overlap_seconds or getattr(
             app_config.capture.audio, "overlap_seconds", 0
         )
@@ -132,7 +136,9 @@ class VideoCaptureProcessor:
             # Extract and transcribe audio
             logger.info("Starting audio processing...")
             try:
-                transcript_count = self._process_audio(video_path, source_id, start_timestamp)
+                transcript_count = self._process_audio(
+                    video_path, source_id, start_timestamp
+                )
             except Exception as e:
                 logger.error(f"Audio processing failed: {e}", exc_info=True)
                 transcript_count = 0
@@ -156,7 +162,9 @@ class VideoCaptureProcessor:
         finally:
             self.db.disconnect()
 
-    def _process_frames(self, video_path: Path, source_id: int, start_timestamp: datetime) -> int:
+    def _process_frames(
+        self, video_path: Path, source_id: int, start_timestamp: datetime
+    ) -> int:
         """
         Extract and store frames from video with deduplication.
 
@@ -185,8 +193,8 @@ class VideoCaptureProcessor:
 
             if self.enable_deduplication:
                 # Check if frame should be stored (deduplication enabled)
-                should_store, perceptual_hash, similarity = self.frame_processor.should_store_frame(
-                    source_id, jpeg_bytes
+                should_store, perceptual_hash, similarity = (
+                    self.frame_processor.should_store_frame(source_id, jpeg_bytes)
                 )
             else:
                 # No deduplication - always store frame
@@ -239,14 +247,18 @@ class VideoCaptureProcessor:
                 )
 
         # Log deduplication stats
-        dedup_percentage = (skipped_count / timeline_count * 100) if timeline_count > 0 else 0
+        dedup_percentage = (
+            (skipped_count / timeline_count * 100) if timeline_count > 0 else 0
+        )
         logger.info(
             f"Frame extraction complete: {timeline_count} total, {frame_count} unique, {skipped_count} duplicates ({dedup_percentage:.1f}% deduplication)"
         )
 
         return frame_count
 
-    def _process_audio(self, video_path: Path, source_id: int, start_timestamp: datetime) -> int:
+    def _process_audio(
+        self, video_path: Path, source_id: int, start_timestamp: datetime
+    ) -> int:
         """
         Extract and transcribe audio from video.
 
@@ -261,7 +273,9 @@ class VideoCaptureProcessor:
 
             try:
                 audio_path = extract_audio(video_path, audio_path)
-                logger.info(f"Audio extracted successfully: {audio_path.stat().st_size} bytes")
+                logger.info(
+                    f"Audio extracted successfully: {audio_path.stat().st_size} bytes"
+                )
             except RuntimeError as e:
                 logger.warning(f"Could not extract audio: {e}")
                 return 0
@@ -273,7 +287,9 @@ class VideoCaptureProcessor:
                     logger.info(f"Detected language: {language}")
                 except Exception as e:
                     logger.warning(f"Language detection failed: {e}")
-                    language = app_config.whisper.fallback_language  # Default to fallback language
+                    language = (
+                        app_config.whisper.fallback_language
+                    )  # Default to fallback language
             else:
                 language = self.config.whisper_language
                 logger.info(f"Using configured language: {language}")
@@ -289,7 +305,9 @@ class VideoCaptureProcessor:
                     f"Processing chunk {chunk['index']}: {chunk['start_seconds']:.1f}s - {chunk['end_seconds']:.1f}s"
                 )
 
-                chunk_start = start_timestamp + timedelta(seconds=chunk["start_seconds"])
+                chunk_start = start_timestamp + timedelta(
+                    seconds=chunk["start_seconds"]
+                )
                 chunk_end = start_timestamp + timedelta(seconds=chunk["end_seconds"])
 
                 # Transcribe chunk
@@ -305,16 +323,24 @@ class VideoCaptureProcessor:
                             f"Non-speech audio detected in chunk {chunk['index']}: {audio_type}"
                         )
                     else:
-                        logger.info(f"Transcription result: {len(result.get('text', ''))} chars")
+                        logger.info(
+                            f"Transcription result: {len(result.get('text', ''))} chars"
+                        )
                 except Exception as e:
-                    logger.error(f"Transcription failed for chunk {chunk['index']}: {e}")
+                    logger.error(
+                        f"Transcription failed for chunk {chunk['index']}: {e}"
+                    )
                     continue
 
                 # Store transcriptions including non-speech markers
                 text = result.get("text", "").strip()
-                if text or result.get("is_non_speech", False):  # Store non-empty or non-speech
+                if text or result.get(
+                    "is_non_speech", False
+                ):  # Store non-empty or non-speech
                     # Calculate confidence
-                    confidence = self.transcriber.calculate_confidence(result.get("segments", []))
+                    confidence = self.transcriber.calculate_confidence(
+                        result.get("segments", [])
+                    )
 
                     # Determine overlap timestamps if any
                     overlap_start_ts = None
@@ -441,8 +467,8 @@ class StreamCaptureProcessor:
             return
 
         # Check if frame should be stored (deduplication)
-        should_store, perceptual_hash, similarity = self.frame_processor.should_store_frame(
-            self.source_id, frame_data
+        should_store, perceptual_hash, similarity = (
+            self.frame_processor.should_store_frame(self.source_id, frame_data)
         )
 
         frame_id = None
@@ -466,7 +492,9 @@ class StreamCaptureProcessor:
 
             # Store frame
             frame_id = self.db.store_frame(frame)
-            logger.debug(f"Stored new frame {frame_id} at {timestamp} ({width}x{height})")
+            logger.debug(
+                f"Stored new frame {frame_id} at {timestamp} ({width}x{height})"
+            )
         else:
             # Find existing frame with this hash
             frame_id = self.db.find_similar_frame(self.source_id, perceptual_hash)
@@ -500,7 +528,10 @@ class StreamCaptureProcessor:
                     import pytz
 
                     end_timestamp = datetime.now(pytz.UTC)
-                elif hasattr(end_timestamp, "tzinfo") and end_timestamp.tzinfo is not None:
+                elif (
+                    hasattr(end_timestamp, "tzinfo")
+                    and end_timestamp.tzinfo is not None
+                ):
                     # end_timestamp is timezone-aware, make it naive
                     end_timestamp = end_timestamp.replace(tzinfo=None)
 

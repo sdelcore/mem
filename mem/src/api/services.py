@@ -27,7 +27,9 @@ class CaptureService:
     def __init__(self, db_path: str = None):
         self.db_path = db_path or config.database.path
 
-    def start_capture(self, filepath: str, capture_config: Optional[dict[str, Any]] = None) -> str:
+    def start_capture(
+        self, filepath: str, capture_config: Optional[dict[str, Any]] = None
+    ) -> str:
         """Start video capture processing.
 
         Args:
@@ -67,7 +69,9 @@ class CaptureService:
             result = processor.process_video(Path(filepath))
 
             # Update job with result
-            JOBS[job_id]["status"] = "completed" if result["status"] == "success" else "failed"
+            JOBS[job_id]["status"] = (
+                "completed" if result["status"] == "success" else "failed"
+            )
             JOBS[job_id]["result"] = result
             JOBS[job_id]["completed_at"] = datetime.now()
 
@@ -231,7 +235,9 @@ class SearchService:
             count_query += " AND t.source_id = ?"
             count_params.append(source_id)
 
-        total_count = self.db.connection.execute(count_query, count_params).fetchone()[0]
+        total_count = self.db.connection.execute(count_query, count_params).fetchone()[
+            0
+        ]
 
         return {
             "type": "timeline",
@@ -349,7 +355,9 @@ class SearchService:
             count_query += " AND source_id = ?"
             count_params.append(source_id)
 
-        total_count = self.db.connection.execute(count_query, count_params).fetchone()[0]
+        total_count = self.db.connection.execute(count_query, count_params).fetchone()[
+            0
+        ]
 
         return {
             "type": "transcript",
@@ -371,7 +379,9 @@ class SearchService:
         stats = self.db.get_statistics()
 
         # Count active/completed jobs
-        active_jobs = sum(1 for j in JOBS.values() if j["status"] in ["queued", "processing"])
+        active_jobs = sum(
+            1 for j in JOBS.values() if j["status"] in ["queued", "processing"]
+        )
         completed_jobs = sum(1 for j in JOBS.values() if j["status"] == "completed")
         failed_jobs = sum(1 for j in JOBS.values() if j["status"] == "failed")
 
@@ -390,7 +400,9 @@ class SearchService:
             "storage": {
                 "frames_stored": stats["frames"]["unique"],
                 "total_references": stats["frames"]["total_references"],
-                "deduplication_rate": stats["frames"].get("deduplication_percentage", 0),
+                "deduplication_rate": stats["frames"].get(
+                    "deduplication_percentage", 0
+                ),
                 "size_mb": stats["frames"].get("size_mb", 0),
             },
             "sources": {

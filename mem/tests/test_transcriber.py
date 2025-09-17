@@ -72,7 +72,9 @@ class TestTranscriber:
     @patch("src.capture.transcriber.WhisperModel")
     def test_init_with_params(self, mock_whisper_model, mock_config_module):
         """Test transcriber initialization with custom parameters."""
-        transcriber = Transcriber(model_name="large", device="cuda", compute_type="float16")
+        transcriber = Transcriber(
+            model_name="large", device="cuda", compute_type="float16"
+        )
 
         assert transcriber.model_name == "large"
         assert transcriber.device == "cuda"
@@ -104,7 +106,9 @@ class TestTranscriber:
 
     @patch("src.capture.transcriber.config")
     @patch("src.capture.transcriber.WhisperModel")
-    def test_transcribe_audio(self, mock_whisper_model, mock_config_module, temp_audio_file):
+    def test_transcribe_audio(
+        self, mock_whisper_model, mock_config_module, temp_audio_file
+    ):
         """Test audio transcription."""
         mock_config_module.whisper.model = "base"
         mock_config_module.whisper.device = "cpu"
@@ -174,7 +178,9 @@ class TestTranscriber:
 
     @patch("src.capture.transcriber.config")
     @patch("src.capture.transcriber.WhisperModel")
-    def test_detect_language(self, mock_whisper_model, mock_config_module, temp_audio_file):
+    def test_detect_language(
+        self, mock_whisper_model, mock_config_module, temp_audio_file
+    ):
         """Test language detection."""
         mock_config_module.whisper.model = "base"
         mock_config_module.whisper.device = "cpu"
@@ -210,7 +216,10 @@ class TestTranscriber:
         assert transcriber.detect_non_speech_patterns("") == "[Silence]"
 
         # Test repetitive audio (changed expectation based on actual behavior)
-        assert transcriber.detect_non_speech_patterns("la la la la") == "[Repetitive Audio]"
+        assert (
+            transcriber.detect_non_speech_patterns("la la la la")
+            == "[Repetitive Audio]"
+        )
 
         # Test normal text
         assert transcriber.detect_non_speech_patterns("Hello world") == ""

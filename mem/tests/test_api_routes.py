@@ -34,7 +34,9 @@ class TestCaptureEndpoint:
                     "filepath": mock_video_file,
                 }
 
-                response = test_client.post("/api/capture", json={"filepath": mock_video_file})
+                response = test_client.post(
+                    "/api/capture", json={"filepath": mock_video_file}
+                )
 
                 assert response.status_code == status.HTTP_200_OK
                 data = response.json()
@@ -127,7 +129,9 @@ class TestSearchEndpoint:
         with patch("src.api.routes.search_service.search_timeline") as mock_search:
             mock_search.return_value = {"count": 0, "entries": [], "pagination": None}
 
-            response = test_client.get(f"/api/search?type=timeline&start={start}&end={end}")
+            response = test_client.get(
+                f"/api/search?type=timeline&start={start}&end={end}"
+            )
 
             assert response.status_code == status.HTTP_200_OK
             call_args = mock_search.call_args[0]
@@ -189,7 +193,9 @@ class TestSearchEndpoint:
         """Test combined search (all type)."""
         with patch("src.api.routes.search_service.search_timeline") as mock_timeline:
             mock_timeline.return_value = {"count": 5, "entries": [], "pagination": None}
-            with patch("src.api.routes.search_service.search_transcripts") as mock_trans:
+            with patch(
+                "src.api.routes.search_service.search_transcripts"
+            ) as mock_trans:
                 mock_trans.return_value = {
                     "count": 3,
                     "results": [],

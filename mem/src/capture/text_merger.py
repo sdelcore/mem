@@ -7,7 +7,9 @@ from typing import List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
-def find_overlap(text1: str, text2: str, min_overlap_ratio: float = 0.8) -> Optional[int]:
+def find_overlap(
+    text1: str, text2: str, min_overlap_ratio: float = 0.8
+) -> Optional[int]:
     """
     Find the overlap point between two texts.
 
@@ -59,12 +61,16 @@ def find_overlap(text1: str, text2: str, min_overlap_ratio: float = 0.8) -> Opti
                     best_match_pos = len(" ".join(words1[:start_idx])) + 1
 
     if best_match_pos is not None:
-        logger.debug(f"Found overlap of {best_match_length} words at position {best_match_pos}")
+        logger.debug(
+            f"Found overlap of {best_match_length} words at position {best_match_pos}"
+        )
 
     return best_match_pos
 
 
-def merge_overlapping_texts(texts: List[Tuple[str, float]], overlap_threshold: float = 0.8) -> str:
+def merge_overlapping_texts(
+    texts: List[Tuple[str, float]], overlap_threshold: float = 0.8
+) -> str:
     """
     Merge a list of potentially overlapping text chunks.
 
@@ -173,12 +179,17 @@ def deduplicate_segments(segments: List[dict]) -> List[dict]:
             # Check if this segment overlaps with the last one
             if segment["start"] < last_segment["end"]:
                 # Overlapping segments - check if they're duplicates
-                if segment["text"].strip().lower() == last_segment["text"].strip().lower():
+                if (
+                    segment["text"].strip().lower()
+                    == last_segment["text"].strip().lower()
+                ):
                     # Duplicate - extend the last segment's end time if needed
                     last_segment["end"] = max(last_segment["end"], segment["end"])
                 else:
                     # Different text but overlapping time - keep both but adjust times
-                    if segment["start"] < last_segment["end"] - 0.5:  # Significant overlap
+                    if (
+                        segment["start"] < last_segment["end"] - 0.5
+                    ):  # Significant overlap
                         # Likely the same content, keep the one with better timing
                         if len(segment["text"]) > len(last_segment["text"]):
                             deduplicated[-1] = segment

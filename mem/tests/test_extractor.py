@@ -37,7 +37,9 @@ class TestParseVideoTimestamp:
 class TestGetAudioChunks:
     """Tests for get_audio_chunks function with overlap support."""
 
-    def create_test_audio(self, duration_seconds: int = 10, sample_rate: int = 16000) -> Path:
+    def create_test_audio(
+        self, duration_seconds: int = 10, sample_rate: int = 16000
+    ) -> Path:
         """Create a test audio file."""
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             path = Path(tmp.name)
@@ -60,7 +62,9 @@ class TestGetAudioChunks:
         audio_path = self.create_test_audio(duration_seconds=10)
 
         try:
-            chunks = list(get_audio_chunks(audio_path, chunk_duration=3, overlap_seconds=0))
+            chunks = list(
+                get_audio_chunks(audio_path, chunk_duration=3, overlap_seconds=0)
+            )
 
             # Should have 4 chunks: 0-3, 3-6, 6-9, 9-10
             assert len(chunks) == 4
@@ -94,7 +98,9 @@ class TestGetAudioChunks:
         audio_path = self.create_test_audio(duration_seconds=10)
 
         try:
-            chunks = list(get_audio_chunks(audio_path, chunk_duration=5, overlap_seconds=1))
+            chunks = list(
+                get_audio_chunks(audio_path, chunk_duration=5, overlap_seconds=1)
+            )
 
             # With 5-second chunks and 1-second overlap, advancing by 4 seconds each time
             # Chunks: 0-5, 4-9, 8-10
@@ -110,11 +116,15 @@ class TestGetAudioChunks:
 
             # Check second chunk (has overlap before and after)
             assert chunks[1]["index"] == 1
-            assert chunks[1]["start_seconds"] == 4.0  # Starts 1 second before previous chunk ended
+            assert (
+                chunks[1]["start_seconds"] == 4.0
+            )  # Starts 1 second before previous chunk ended
             assert chunks[1]["end_seconds"] == 9.0
             assert chunks[1]["has_overlap"] is True
             assert chunks[1]["overlap_start_seconds"] == 4.0  # Overlaps with previous
-            assert chunks[1]["overlap_end_seconds"] == 8.0  # Overlap with next starts at 8s
+            assert (
+                chunks[1]["overlap_end_seconds"] == 8.0
+            )  # Overlap with next starts at 8s
 
             # Check last chunk (has overlap before, no overlap after)
             assert chunks[2]["index"] == 2
@@ -134,7 +144,9 @@ class TestGetAudioChunks:
 
         try:
             # Test with overlap equal to chunk duration (should fallback to no overlap)
-            chunks = list(get_audio_chunks(audio_path, chunk_duration=3, overlap_seconds=3))
+            chunks = list(
+                get_audio_chunks(audio_path, chunk_duration=3, overlap_seconds=3)
+            )
 
             # Should behave like no overlap
             assert len(chunks) == 4
@@ -176,7 +188,9 @@ class TestGetAudioChunks:
         audio_path = self.create_test_audio(duration_seconds=3)
 
         try:
-            chunks = list(get_audio_chunks(audio_path, chunk_duration=5, overlap_seconds=1))
+            chunks = list(
+                get_audio_chunks(audio_path, chunk_duration=5, overlap_seconds=1)
+            )
 
             # Should have only 1 chunk
             assert len(chunks) == 1

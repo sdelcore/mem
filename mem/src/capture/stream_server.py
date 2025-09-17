@@ -107,7 +107,9 @@ class RTMPServer:
             return False
 
         if session.status != "waiting":
-            logger.warning(f"Stream {stream_key} not in waiting state: {session.status}")
+            logger.warning(
+                f"Stream {stream_key} not in waiting state: {session.status}"
+            )
             return False
 
         try:
@@ -145,7 +147,9 @@ class RTMPServer:
             session.started_at = datetime.now()
 
             # Start frame processing thread
-            thread = threading.Thread(target=self._process_stream_frames, args=(session,))
+            thread = threading.Thread(
+                target=self._process_stream_frames, args=(session,)
+            )
             thread.daemon = True
             thread.start()
 
@@ -318,7 +322,9 @@ class RTMPServer:
                         "resolution": f"{s.width}x{s.height}" if s.width else None,
                         "frames_received": s.frames_received,
                         "frames_stored": s.frames_stored,
-                        "started_at": (s.started_at.isoformat() if s.started_at else None),
+                        "started_at": (
+                            s.started_at.isoformat() if s.started_at else None
+                        ),
                         "duration": (
                             (datetime.now() - s.started_at).total_seconds()
                             if s.started_at and s.status == "live"

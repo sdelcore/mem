@@ -39,7 +39,8 @@ def parse_video_timestamp(filename: str) -> datetime:
 
     if not match:
         raise ValueError(
-            f"Invalid filename format: {filename}. " f"Expected: {config.files.filename_format}.mp4"
+            f"Invalid filename format: {filename}. "
+            f"Expected: {config.files.filename_format}.mp4"
         )
 
     year, month, day, hour, minute, second = map(int, match.groups())

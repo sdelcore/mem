@@ -82,7 +82,9 @@ class TestFrameProcessor(unittest.TestCase):
 
     def test_calculate_similarity_different(self):
         """Test similarity calculation for different images."""
-        image1 = self.create_test_image(pattern="gradient", color=(255, 0, 0))  # Red gradient
+        image1 = self.create_test_image(
+            pattern="gradient", color=(255, 0, 0)
+        )  # Red gradient
         image2 = self.create_test_image(
             pattern="noise", color=(0, 0, 255)
         )  # Blue noise - very different
@@ -137,7 +139,9 @@ class TestFrameProcessor(unittest.TestCase):
 
         # Different frame
         image2 = self.create_test_image(pattern="checkerboard", color=(0, 255, 0))
-        should_store2, _, sim2 = self.frame_processor.should_store_frame(source_id, image2)
+        should_store2, _, sim2 = self.frame_processor.should_store_frame(
+            source_id, image2
+        )
         self.assertTrue(should_store2)  # Should store different frame
         self.assertLess(sim2, 95.0)  # Low similarity
 
@@ -195,7 +199,9 @@ class TestFrameProcessor(unittest.TestCase):
         dedup.should_store_frame(source_id, buffer1.getvalue())
 
         # Check if slightly different frame is stored
-        should_store, _, similarity = dedup.should_store_frame(source_id, buffer2.getvalue())
+        should_store, _, similarity = dedup.should_store_frame(
+            source_id, buffer2.getvalue()
+        )
 
         # With lower threshold, similar frames might not be stored
         if similarity >= 80.0:

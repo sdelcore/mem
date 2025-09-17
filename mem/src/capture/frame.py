@@ -81,7 +81,9 @@ class FrameProcessor:
             logger.error(f"Error calculating similarity: {e}")
             return 0.0
 
-    def should_store_frame(self, source_id: int, image_bytes: bytes) -> tuple[bool, str, float]:
+    def should_store_frame(
+        self, source_id: int, image_bytes: bytes
+    ) -> tuple[bool, str, float]:
         """
         Determine if a frame should be stored as new or is a duplicate.
 

@@ -46,7 +46,9 @@ class TestDatabase(unittest.TestCase):
         """Test schema initialization."""
         # Schema should already be initialized by setUp
         # Try to create a source to verify tables exist
-        source = self.Source(type="video", filename="test.mp4", start_timestamp=datetime.utcnow())
+        source = self.Source(
+            type="video", filename="test.mp4", start_timestamp=datetime.utcnow()
+        )
         source_id = self.db.create_source(source)
         self.assertGreater(source_id, 0)
 
@@ -79,7 +81,9 @@ class TestDatabase(unittest.TestCase):
         from src.storage.models import Frame
 
         # Create source first
-        source = self.Source(type="video", filename="test.mp4", start_timestamp=datetime.utcnow())
+        source = self.Source(
+            type="video", filename="test.mp4", start_timestamp=datetime.utcnow()
+        )
         source_id = self.db.create_source(source)
 
         # Create frame
@@ -111,7 +115,9 @@ class TestDatabase(unittest.TestCase):
         from src.storage.models import Frame
 
         # Create source
-        source = self.Source(type="video", filename="test.mp4", start_timestamp=datetime.utcnow())
+        source = self.Source(
+            type="video", filename="test.mp4", start_timestamp=datetime.utcnow()
+        )
         source_id = self.db.create_source(source)
 
         # Store frame
@@ -139,7 +145,9 @@ class TestDatabase(unittest.TestCase):
         from src.storage.models import Timeline
 
         # Create source
-        source = self.Source(type="video", filename="test.mp4", start_timestamp=datetime.utcnow())
+        source = self.Source(
+            type="video", filename="test.mp4", start_timestamp=datetime.utcnow()
+        )
         source_id = self.db.create_source(source)
 
         # Create timeline entry
@@ -159,7 +167,9 @@ class TestDatabase(unittest.TestCase):
         from src.storage.models import Transcription
 
         # Create source
-        source = self.Source(type="video", filename="test.mp4", start_timestamp=datetime.utcnow())
+        source = self.Source(
+            type="video", filename="test.mp4", start_timestamp=datetime.utcnow()
+        )
         source_id = self.db.create_source(source)
 
         # Create transcription
@@ -205,7 +215,9 @@ class TestDatabase(unittest.TestCase):
     def test_reset_database(self):
         """Test database reset."""
         # Create some data
-        source = self.Source(type="video", filename="test.mp4", start_timestamp=datetime.utcnow())
+        source = self.Source(
+            type="video", filename="test.mp4", start_timestamp=datetime.utcnow()
+        )
         source_id = self.db.create_source(source)
 
         # Reset database

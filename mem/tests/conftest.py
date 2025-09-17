@@ -142,7 +142,9 @@ def sample_annotation():
 
 
 @pytest.fixture
-def populated_db(test_db, sample_source, sample_frame, sample_timeline, sample_transcription):
+def populated_db(
+    test_db, sample_source, sample_frame, sample_timeline, sample_transcription
+):
     """Create a populated test database."""
     # Insert sample data
     source_id = test_db.create_source(sample_source)

@@ -67,7 +67,9 @@ class TestCaptureService:
     def test_start_capture_failure(self, capture_service, mock_video_file):
         """Test capture job failure handling."""
         with patch("src.api.services.VideoCaptureProcessor") as mock_processor:
-            mock_processor.return_value.process_video.side_effect = Exception("Processing failed")
+            mock_processor.return_value.process_video.side_effect = Exception(
+                "Processing failed"
+            )
 
             job_id = capture_service.start_capture(mock_video_file)
 
@@ -164,7 +166,9 @@ class TestSearchService:
         """Test frame retrieval with resizing."""
         frame_id = populated_db.store_unique_frame(sample_frame)
 
-        image_data, content_type = search_service.get_frame(frame_id, format="jpeg", size="640x480")
+        image_data, content_type = search_service.get_frame(
+            frame_id, format="jpeg", size="640x480"
+        )
 
         assert image_data is not None
         # Image should be different size after resize

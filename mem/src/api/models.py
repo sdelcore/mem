@@ -24,7 +24,9 @@ class CreateStreamRequest(BaseModel):
     """Request to create a new stream session."""
 
     name: Optional[str] = Field(default=None, description="Optional stream name")
-    metadata: Optional[dict[str, Any]] = Field(default=None, description="Optional metadata")
+    metadata: Optional[dict[str, Any]] = Field(
+        default=None, description="Optional metadata"
+    )
 
 
 class StreamSessionResponse(BaseModel):
@@ -62,15 +64,27 @@ class StreamStatusResponse(BaseModel):
 class SearchRequest(BaseModel):
     """Generic search request parameters."""
 
-    type: Literal["timeline", "frame", "transcript", "all"] = Field(..., description="Search type")
-    start: Optional[datetime] = Field(default=None, description="Start time for timeline searches")
-    end: Optional[datetime] = Field(default=None, description="End time for timeline searches")
+    type: Literal["timeline", "frame", "transcript", "all"] = Field(
+        ..., description="Search type"
+    )
+    start: Optional[datetime] = Field(
+        default=None, description="Start time for timeline searches"
+    )
+    end: Optional[datetime] = Field(
+        default=None, description="End time for timeline searches"
+    )
     source_id: Optional[int] = Field(default=None, description="Filter by source ID")
-    q: Optional[str] = Field(default=None, description="Query text for transcript search")
-    frame_id: Optional[int] = Field(default=None, description="Frame ID for direct frame access")
+    q: Optional[str] = Field(
+        default=None, description="Query text for transcript search"
+    )
+    frame_id: Optional[int] = Field(
+        default=None, description="Frame ID for direct frame access"
+    )
     limit: Optional[int] = Field(default=100, description="Maximum results to return")
     offset: Optional[int] = Field(default=0, description="Pagination offset")
-    format: Optional[str] = Field(default="jpeg", description="Output format for frames")
+    format: Optional[str] = Field(
+        default="jpeg", description="Output format for frames"
+    )
     size: Optional[str] = Field(
         default=None, description="Size for frame output (e.g., '640x480', 'thumb')"
     )
@@ -140,7 +154,9 @@ class SearchResponse(BaseModel):
     type: str = Field(..., description="Type of search performed")
     count: int = Field(..., description="Total number of results")
     results: list[Any] = Field(..., description="Search results")
-    pagination: Optional[dict[str, Any]] = Field(default=None, description="Pagination info")
+    pagination: Optional[dict[str, Any]] = Field(
+        default=None, description="Pagination info"
+    )
 
 
 class TimelineResponse(BaseModel):
@@ -175,7 +191,9 @@ class ErrorResponse(BaseModel):
     """Error response."""
 
     error: str = Field(..., description="Error message")
-    detail: Optional[str] = Field(default=None, description="Detailed error information")
+    detail: Optional[str] = Field(
+        default=None, description="Detailed error information"
+    )
 
 
 # Annotation request/response models

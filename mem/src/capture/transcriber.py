@@ -17,7 +17,9 @@ logger = logging.getLogger(__name__)
 class Transcriber:
     """Handles audio transcription using Faster-Whisper."""
 
-    def __init__(self, model_name: str = None, device: str = None, compute_type: str = None):
+    def __init__(
+        self, model_name: str = None, device: str = None, compute_type: str = None
+    ):
         """
         Initialize transcriber with Faster-Whisper.
 
@@ -29,7 +31,9 @@ class Transcriber:
         self.model_name = model_name or config.whisper.model
         self.device = device or config.whisper.device
         # Faster-whisper specific: compute type for quantization
-        self.compute_type = compute_type or getattr(config.whisper, "compute_type", "float16")
+        self.compute_type = compute_type or getattr(
+            config.whisper, "compute_type", "float16"
+        )
         self.model = None
 
     def load_model(self):
@@ -48,7 +52,9 @@ class Transcriber:
             )
             logger.info(f"Faster-Whisper model loaded successfully on {self.device}")
 
-    def transcribe_audio(self, audio_path: Path, language: Optional[str] = None) -> dict[str, Any]:
+    def transcribe_audio(
+        self, audio_path: Path, language: Optional[str] = None
+    ) -> dict[str, Any]:
         """
         Transcribe audio file with non-speech detection.
 
@@ -389,10 +395,14 @@ class Transcriber:
         text_lower = text.lower()
 
         # Check for specific patterns in text
-        if any(pattern in text_lower for pattern in ["♪", "♫", "music", "singing", "song"]):
+        if any(
+            pattern in text_lower for pattern in ["♪", "♫", "music", "singing", "song"]
+        ):
             return "[Music]"
 
-        if any(pattern in text_lower for pattern in ["applause", "clapping", "cheering"]):
+        if any(
+            pattern in text_lower for pattern in ["applause", "clapping", "cheering"]
+        ):
             return "[Applause]"
 
         if any(pattern in text_lower for pattern in ["laughter", "laughing", "haha"]):
@@ -449,7 +459,9 @@ class Transcriber:
                     return "[Repetitive Audio]"
 
             # Very short repeated sounds
-            if all(word in ["la", "na", "da", "oh", "ah", "mm", "uh"] for word in words):
+            if all(
+                word in ["la", "na", "da", "oh", "ah", "mm", "uh"] for word in words
+            ):
                 return "[Music]"
 
         return ""

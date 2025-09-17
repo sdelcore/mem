@@ -269,11 +269,15 @@ class TestAnnotationDatabase(unittest.TestCase):
 
         self.assertIn(timestamp_14_00, annotations_by_timestamp)
         self.assertEqual(len(annotations_by_timestamp[timestamp_14_00]), 1)
-        self.assertEqual(annotations_by_timestamp[timestamp_14_00][0].content, "First note")
+        self.assertEqual(
+            annotations_by_timestamp[timestamp_14_00][0].content, "First note"
+        )
 
         self.assertIn(timestamp_14_10, annotations_by_timestamp)
         self.assertEqual(len(annotations_by_timestamp[timestamp_14_10]), 1)
-        self.assertEqual(annotations_by_timestamp[timestamp_14_10][0].content, "AI summary")
+        self.assertEqual(
+            annotations_by_timestamp[timestamp_14_10][0].content, "AI summary"
+        )
 
 
 if __name__ == "__main__":

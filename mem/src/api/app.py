@@ -10,7 +10,9 @@ from src.api import routes  # noqa: E402
 from src.config import config
 
 # Configure logging
-logging.basicConfig(level=getattr(logging, config.logging.level), format=config.logging.format)
+logging.basicConfig(
+    level=getattr(logging, config.logging.level), format=config.logging.format
+)
 logger = logging.getLogger(__name__)
 
 # Create FastAPI app

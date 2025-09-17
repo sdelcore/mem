@@ -17,7 +17,9 @@ class Source(BaseModel):
     start_timestamp: datetime
     end_timestamp: Optional[datetime] = None
     created_at: Optional[datetime] = None
-    metadata: Optional[dict[str, Any]] = None  # Contains fps, width, height, duration, etc.
+    metadata: Optional[dict[str, Any]] = (
+        None  # Contains fps, width, height, duration, etc.
+    )
 
     @property
     def duration_seconds(self) -> Optional[float]:
@@ -36,7 +38,9 @@ class Frame(BaseModel):
     last_seen_timestamp: datetime
     perceptual_hash: str  # For similarity detection
     image_data: bytes  # JPEG compressed image
-    metadata: Optional[dict[str, Any]] = None  # Contains jpeg_quality, processing params, etc.
+    metadata: Optional[dict[str, Any]] = (
+        None  # Contains jpeg_quality, processing params, etc.
+    )
 
     @property
     def size_bytes(self) -> int:
@@ -57,7 +61,9 @@ class Timeline(BaseModel):
     @property
     def scene_changed(self) -> bool:
         """Computed scene change flag based on similarity score."""
-        return self.similarity_score < 95.0 if self.similarity_score is not None else False
+        return (
+            self.similarity_score < 95.0 if self.similarity_score is not None else False
+        )
 
 
 class Transcription(BaseModel):

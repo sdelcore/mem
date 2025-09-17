@@ -20,14 +20,19 @@ Key features:
 ```bash
 cd mem/
 uv sync                                          # Install dependencies
+uv add package-name                              # Add new dependency
 uv run uvicorn src.api.app:app --reload --port 8000  # Start API server
 uv run pytest tests/                            # Run all tests
 uv run pytest tests/test_db.py -v              # Run specific test file
 uv run pytest tests/test_api_services.py -v    # Test API services
+uv run pytest tests/test_models.py -v          # Test Pydantic models
+uv run pytest tests/test_frame.py -v           # Test frame processing
 uv run pytest -k "test_name" -v                 # Run specific test by name
-make format                                      # Format code with black and ruff
+uv run pytest tests/ --cov=src --cov-report=html # Run with coverage report
+make install                                     # Install dependencies with uv sync
+make format                                      # Format code with black and ruff --fix
 make lint                                        # Run ruff linter
-make clean                                       # Clean build artifacts
+make clean                                       # Clean all build artifacts and caches
 ```
 
 ### Frontend (React/TypeScript)
@@ -52,14 +57,53 @@ tail -f /tmp/mem-backend.log                    # Backend logs
 tail -f /tmp/mem-frontend.log                   # Frontend logs
 ```
 
+### Docker Development
+```bash
+# Build and run all services (backend, frontend, RTMP server)
+docker-compose up -d
+
+# Build specific service
+docker-compose build mem-backend
+docker-compose build mem-frontend
+docker-compose build mem-rtmp
+
+# View logs
+docker-compose logs -f mem-backend
+docker-compose logs -f mem-frontend
+docker-compose logs -f mem-rtmp
+
+# Stop all services
+docker-compose down
+
+# Clean up volumes
+docker-compose down -v
+```
+
+### Nix Development Environment
+```bash
+# Enter Nix development shell with all dependencies
+nix develop
+
+# Run commands directly with Nix
+nix develop -c uv run uvicorn src.api.app:app --reload
+nix develop -c uv run pytest tests/
+
+# Why use Nix develop?
+# - Provides reproducible environment with exact versions
+# - Includes system dependencies (Python 3.9, FFmpeg, DuckDB CLI)
+# - Ensures consistent development across machines
+```
+
 ## Architecture
 
 ### Core Design Principles
-- **Temporal Architecture**: All data anchored to absolute UTC timestamps
+- **Temporal Architecture**: All data anchored to absolute UTC timestamps parsed from filenames
 - **Storage Optimization**: Perceptual hashing achieves ~95% deduplication for static scenes
-- **Strict Input Format**: Videos must be named `YYYY-MM-DD_HH-MM-SS.mp4`
-- **Database Storage**: Frames stored as BLOBs in DuckDB, no external dependencies
+- **Strict Input Format**: Videos MUST be named `YYYY-MM-DD_HH-MM-SS.mp4` (UTC time)
+- **Database Storage**: Frames stored as JPEG BLOBs in DuckDB, no filesystem dependencies
 - **Stream Support**: RTMP streams from OBS Studio with auto-resolution detection
+- **GPU Acceleration**: CUDA-enabled Whisper for fast transcription (when available)
+- **Capture First**: Raw data capture separated from analysis/processing
 
 ### Backend Structure (`mem/src/`)
 ```
@@ -165,9 +209,19 @@ uv run pytest tests/ -m integration
 # Test files
 tests/test_db.py              # Database operations
 tests/test_models.py           # Pydantic models
-tests/test_frame.py            # Frame processing
+tests/test_frame.py            # Frame processing and deduplication
 tests/test_api_services.py    # API service layer
+tests/test_extractor.py       # Video extraction (if exists)
+tests/test_transcriber.py     # Whisper transcription (if exists)
 tests/conftest.py              # Shared fixtures
+
+# Manual API testing
+curl -X POST http://localhost:8000/api/capture \
+  -H "Content-Type: application/json" \
+  -d '{"filepath": "/path/to/2025-08-22_14-30-45.mp4"}'
+
+curl "http://localhost:8000/api/search?type=timeline&limit=10"
+curl "http://localhost:8000/api/status"
 ```
 
 ### Frontend Testing
@@ -187,14 +241,17 @@ npm run test:e2e
 ### Backend (`config.yaml`)
 ```yaml
 database:
-  path: "mem.duckdb"
+  path: "mem.duckdb"    # Can be absolute path or relative to working directory
 
 capture:
-  frame_interval_seconds: 5
-  jpeg_quality: 85
+  frame_interval_seconds: 5     # Extract frame every N seconds
+  jpeg_quality: 85              # JPEG compression quality (1-100)
+  audio_chunk_duration: 300     # Audio chunks for transcription (seconds)
 
 whisper:
-  model: "base"
+  model: "base"                 # tiny, base, small, medium, large
+  device: "cuda"                # cuda (GPU) or cpu
+  compute_type: "float16"       # float16 for GPU, int8 for CPU
 
 api:
   host: "0.0.0.0"
@@ -205,6 +262,21 @@ streaming:
     enabled: true
     port: 1935
     max_concurrent_streams: 10
+    frame_interval_fps: 1       # Extract 1 frame per second from streams
+```
+
+### Docker Environment Variables
+```bash
+# GPU Configuration (for Whisper acceleration)
+NVIDIA_VISIBLE_DEVICES=0        # GPU device ID
+CUDA_VISIBLE_DEVICES=0          # CUDA device selection
+
+# Application
+MEM_CONFIG_PATH=/app/config/config.yaml  # Config file location
+PYTHONUNBUFFERED=1             # Ensure logs are shown in real-time
+
+# Backend API
+BACKEND_URL=http://mem-backend:8000  # For inter-service communication
 ```
 
 ### Frontend
@@ -225,12 +297,21 @@ streaming:
 
 ### Python (requires 3.9)
 Key packages:
-- `fastapi` & `uvicorn`: REST API
-- `duckdb`: Database engine
-- `opencv-python-headless`: Video processing
-- `openai-whisper`: Audio transcription
-- `imagehash`: Perceptual hashing
-- `pydantic`: Data validation
+- `fastapi` & `uvicorn`: REST API framework
+- `duckdb`: High-performance columnar database
+- `opencv-python-headless`: Video frame extraction
+- `openai-whisper`: Audio transcription (GPU accelerated)
+- `imagehash`: Perceptual hashing for deduplication
+- `pydantic`: Data validation and serialization
+- `httpx`: Async HTTP client
+- `python-multipart`: File upload support
+- `ffmpeg-python`: FFmpeg wrapper for audio extraction
+
+### System Dependencies (provided by Nix)
+- Python 3.9
+- FFmpeg (for audio/video processing)
+- CUDA toolkit (for GPU acceleration)
+- DuckDB CLI tools
 
 ### Frontend
 - `react` & `react-dom`: UI framework

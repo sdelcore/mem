@@ -70,7 +70,10 @@ def test_upload_wrong_extension(test_client: TestClient, tmp_path: Path):
 
     assert response.status_code == 400
     detail = response.json()["detail"]
-    assert "Invalid file extension" in detail or "Expected: YYYY-MM-DD_HH-MM-SS.mkv" in detail
+    assert (
+        "Invalid file extension" in detail
+        or "Expected: YYYY-MM-DD_HH-MM-SS.mkv" in detail
+    )
 
 
 def test_upload_missing_date_parts(test_client: TestClient, tmp_path: Path):

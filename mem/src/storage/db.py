@@ -130,7 +130,9 @@ class Database:
             logger.info(f"Created source {source_id} for {source.filename}")
             return source_id
 
-    def update_source_end(self, source_id: int, end_timestamp: datetime, duration: float):
+    def update_source_end(
+        self, source_id: int, end_timestamp: datetime, duration: float
+    ):
         """Update source end timestamp."""
         self.connection.execute(
             """
@@ -287,7 +289,9 @@ class Database:
             )
             return result.fetchone()[0]
 
-    def get_active_transcription(self, source_id: int, timestamp: datetime) -> Optional[int]:
+    def get_active_transcription(
+        self, source_id: int, timestamp: datetime
+    ) -> Optional[int]:
         """
         Get transcription active at given timestamp.
 
@@ -531,7 +535,9 @@ class Database:
           AND timestamp >= ?
           AND timestamp <= ?
         """
-        self.connection.execute(query, [transcription_id, source_id, start_time, end_time])
+        self.connection.execute(
+            query, [transcription_id, source_id, start_time, end_time]
+        )
         self.connection.commit()
 
     def get_unique_frame_count(self, source_id: int) -> int:
@@ -620,7 +626,9 @@ class Database:
 
     def get_source(self, source_id: int) -> Optional[Source]:
         """Get a specific source by ID."""
-        result = self.connection.execute("SELECT * FROM sources WHERE source_id = ?", [source_id])
+        result = self.connection.execute(
+            "SELECT * FROM sources WHERE source_id = ?", [source_id]
+        )
 
         row = result.fetchone()
         if row:
@@ -639,7 +647,9 @@ class Database:
 
     def get_sources(self) -> list[Source]:
         """Get all sources."""
-        result = self.connection.execute("SELECT * FROM sources ORDER BY start_timestamp DESC")
+        result = self.connection.execute(
+            "SELECT * FROM sources ORDER BY start_timestamp DESC"
+        )
 
         sources = []
         for row in result.fetchall():
@@ -690,7 +700,9 @@ class Database:
                 ],
             )
             annotation_id = result.fetchone()[0]
-            logger.info(f"Created annotation {annotation_id} for source {annotation.source_id}")
+            logger.info(
+                f"Created annotation {annotation_id} for source {annotation.source_id}"
+            )
             return annotation_id
 
     def update_annotation(self, annotation_id: int, updates: dict[str, Any]) -> bool:
@@ -863,7 +875,9 @@ class Database:
 
         return annotations_by_timestamp
 
-    def batch_create_annotations(self, annotations: list["TimeframeAnnotation"]) -> list[int]:
+    def batch_create_annotations(
+        self, annotations: list["TimeframeAnnotation"]
+    ) -> list[int]:
         """
         Create multiple annotations in a single transaction.
 
@@ -890,7 +904,11 @@ class Database:
                         annotation.end_timestamp,
                         annotation.annotation_type,
                         annotation.content,
-                        (json.dumps(annotation.metadata) if annotation.metadata else None),
+                        (
+                            json.dumps(annotation.metadata)
+                            if annotation.metadata
+                            else None
+                        ),
                         annotation.created_by,
                     ],
                 )

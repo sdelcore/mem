@@ -13,7 +13,9 @@ class CaptureFrameConfig(BaseModel):
     interval_seconds: int = 5
     jpeg_quality: int = 85
     enable_deduplication: bool = True  # Enable perceptual hash deduplication
-    similarity_threshold: float = 95.0  # Threshold for considering frames similar (0-100)
+    similarity_threshold: float = (
+        95.0  # Threshold for considering frames similar (0-100)
+    )
 
 
 class CaptureAudioConfig(BaseModel):

@@ -127,7 +127,9 @@ async def capture_video(
 @router.get("/search")
 async def search(
     type: str = Query(..., description="Search type: timeline, frame, transcript, all"),
-    start: Optional[datetime] = Query(None, description="Start time for timeline search"),
+    start: Optional[datetime] = Query(
+        None, description="Start time for timeline search"
+    ),
     end: Optional[datetime] = Query(None, description="End time for timeline search"),
     source_id: Optional[int] = Query(None, description="Filter by source ID"),
     q: Optional[str] = Query(None, description="Query text for transcript search"),
@@ -149,7 +151,9 @@ async def search(
         # Handle frame retrieval
         if type == "frame":
             if not frame_id:
-                raise HTTPException(status_code=400, detail="frame_id required for frame type")
+                raise HTTPException(
+                    status_code=400, detail="frame_id required for frame type"
+                )
 
             # Get frame image data
             image_bytes, content_type = search_service.get_frame(frame_id, format, size)
@@ -172,7 +176,9 @@ async def search(
             if not start:
                 start = end - timedelta(days=1)
 
-            result = search_service.search_timeline(start, end, source_id, limit, offset)
+            result = search_service.search_timeline(
+                start, end, source_id, limit, offset
+            )
 
             # Convert to proper response model
             entries = []
@@ -224,12 +230,16 @@ async def search(
             if not start:
                 start = end - timedelta(days=1)
 
-            timeline_result = search_service.search_timeline(start, end, source_id, limit, offset)
+            timeline_result = search_service.search_timeline(
+                start, end, source_id, limit, offset
+            )
 
             # If there's a text query, also search transcripts
             transcript_results = []
             if q:
-                transcript_result = search_service.search_transcripts(q, source_id, limit, offset)
+                transcript_result = search_service.search_transcripts(
+                    q, source_id, limit, offset
+                )
                 transcript_results = transcript_result["results"]
 
             return SearchResponse(
@@ -308,12 +318,16 @@ async def create_annotation(request: CreateAnnotationRequest):
         )
 
         # Fetch and return the created annotation
-        result = annotation_service.get_annotations(source_id=request.source_id, limit=1)
+        result = annotation_service.get_annotations(
+            source_id=request.source_id, limit=1
+        )
         if result["annotations"]:
             ann = result["annotations"][0]
             return AnnotationResponse(**ann)
         else:
-            raise HTTPException(status_code=500, detail="Failed to retrieve created annotation")
+            raise HTTPException(
+                status_code=500, detail="Failed to retrieve created annotation"
+            )
 
     except Exception as e:
         logger.error(f"Create annotation failed: {e}")
@@ -342,10 +356,14 @@ async def update_annotation(annotation_id: int, request: UpdateAnnotationRequest
 
         success = annotation_service.update_annotation(annotation_id, updates)
         if not success:
-            raise HTTPException(status_code=404, detail=f"Annotation {annotation_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Annotation {annotation_id} not found"
+            )
 
         # Fetch and return the updated annotation
-        query = f"SELECT * FROM timeframe_annotations WHERE annotation_id = {annotation_id}"
+        query = (
+            f"SELECT * FROM timeframe_annotations WHERE annotation_id = {annotation_id}"
+        )
         result = annotation_service.db.connection.execute(query).fetchone()
         if result:
             import json
@@ -363,7 +381,9 @@ async def update_annotation(annotation_id: int, request: UpdateAnnotationRequest
                 updated_at=result[9],
             )
         else:
-            raise HTTPException(status_code=404, detail="Annotation not found after update")
+            raise HTTPException(
+                status_code=404, detail="Annotation not found after update"
+            )
 
     except HTTPException:
         raise
@@ -385,7 +405,9 @@ async def delete_annotation(annotation_id: int):
     try:
         success = annotation_service.delete_annotation(annotation_id)
         if not success:
-            raise HTTPException(status_code=404, detail=f"Annotation {annotation_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Annotation {annotation_id} not found"
+            )
 
         return {"message": f"Annotation {annotation_id} deleted successfully"}
 
@@ -494,7 +516,9 @@ async def create_stream(request: CreateStreamRequest):
         Stream session details including RTMP URL
     """
     try:
-        session = streaming_service.create_stream(name=request.name, metadata=request.metadata)
+        session = streaming_service.create_stream(
+            name=request.name, metadata=request.metadata
+        )
 
         return StreamSessionResponse(
             session_id=session.session_id,
@@ -544,7 +568,9 @@ async def list_streams():
                     rtmp_url=streaming_service.get_rtmp_url(session.stream_key),
                     started_at=session.started_at,
                     ended_at=session.ended_at,
-                    resolution=(f"{session.width}x{session.height}" if session.width else None),
+                    resolution=(
+                        f"{session.width}x{session.height}" if session.width else None
+                    ),
                     frames_received=session.frames_received,
                     frames_stored=session.frames_stored,
                     duration=(
@@ -578,7 +604,9 @@ async def get_stream(stream_key: str):
     try:
         session = streaming_service.get_session(stream_key)
         if not session:
-            raise HTTPException(status_code=404, detail=f"Stream {stream_key} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Stream {stream_key} not found"
+            )
 
         return StreamSessionResponse(
             session_id=session.session_id,
@@ -639,7 +667,9 @@ async def stop_stream(stream_key: str):
     try:
         success = streaming_service.stop_stream(stream_key)
         if not success:
-            raise HTTPException(status_code=404, detail=f"Stream {stream_key} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Stream {stream_key} not found"
+            )
 
         return {"message": f"Stream {stream_key} stopped successfully"}
     except Exception as e:
@@ -660,7 +690,9 @@ async def delete_stream(stream_key: str):
     try:
         success = streaming_service.delete_session(stream_key)
         if not success:
-            raise HTTPException(status_code=404, detail=f"Stream {stream_key} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Stream {stream_key} not found"
+            )
 
         return {"message": f"Stream {stream_key} deleted successfully"}
     except Exception as e:

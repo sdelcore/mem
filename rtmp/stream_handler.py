@@ -23,8 +23,8 @@ def notify_backend(event_type: str, stream_key: str, metadata: dict = None):
                     "event_type": event_type,
                     "stream_key": stream_key,
                     "timestamp": datetime.utcnow().isoformat(),
-                    "metadata": metadata or {}
-                }
+                    "metadata": metadata or {},
+                },
             )
             return response.status_code == 200
     except Exception as e:
