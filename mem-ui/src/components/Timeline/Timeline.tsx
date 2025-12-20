@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Image, FileText, Tag, Layers, Circle } from 'lucide-react'
 import PreviewTooltip from './PreviewTooltip'
 import TimelineSegment from './TimelineSegment'
 
@@ -29,8 +29,8 @@ const Timeline: React.FC<TimelineProps> = ({
   const [selectionEnd, setSelectionEnd] = useState<Date | null>(null)
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 })
 
-  // Group data by time segments (5-minute intervals)
-  const segmentDuration = 5 * 60 * 1000 // 5 minutes in milliseconds
+  // Group data by time segments (30-minute intervals)
+  const segmentDuration = 30 * 60 * 1000 // 30 minutes in milliseconds
   const totalDuration = endTime.getTime() - startTime.getTime()
   const segmentCount = Math.ceil(totalDuration / segmentDuration)
 
@@ -70,7 +70,7 @@ const Timeline: React.FC<TimelineProps> = ({
     }
   }
 
-  const handleMouseDown = (e: React.MouseEvent, segment: any) => {
+  const handleMouseDown = (_e: React.MouseEvent, segment: any) => {
     setIsSelecting(true)
     setSelectionStart(segment.start)
     setSelectionEnd(segment.start)
@@ -126,32 +126,37 @@ const Timeline: React.FC<TimelineProps> = ({
 
   return (
     <div className="relative">
-      {/* Time labels */}
-      <div className="flex justify-between text-xs font-medium text-forest-600 mb-3">
+      {/* Time labels - responsive */}
+      <div className="flex flex-col sm:flex-row sm:justify-between gap-1 sm:gap-0 text-xs font-medium text-forest-600 mb-3">
         <div className="flex items-center gap-1">
           <div className="w-2 h-2 rounded-full bg-sage-300 animate-pulse"></div>
           <span>{format(startTime, 'MMM dd, HH:mm:ss')}</span>
         </div>
-        <span className="text-sage-400">Duration: {Math.round((endTime.getTime() - startTime.getTime()) / (1000 * 60))} minutes</span>
-        <span>{format(endTime, 'MMM dd, HH:mm:ss')}</span>
+        <span className="text-sage-400 hidden sm:block">Duration: {Math.round((endTime.getTime() - startTime.getTime()) / (1000 * 60))} min</span>
+        <span className="text-sage-400">{format(endTime, 'HH:mm:ss')}</span>
       </div>
+
+      {/* Drag hint - hidden on mobile */}
+      <p className="text-xs text-sage-400 mb-2 hidden sm:block">
+        Tip: Click to select time, drag to select range
+      </p>
 
       {/* Timeline with navigation */}
       <div className="relative flex items-center gap-2">
-        {/* Left Navigation Arrow */}
+        {/* Left Navigation Arrow - touch friendly */}
         {onNavigatePrevious && (
           <button
             onClick={onNavigatePrevious}
-            className="flex-shrink-0 w-10 h-10 flex items-center justify-center bg-forest-500 hover:bg-forest-600 text-cream-100 rounded-md transition-colors duration-150"
+            className="flex-shrink-0 w-11 h-11 min-w-11 min-h-11 flex items-center justify-center bg-forest-500 hover:bg-forest-600 text-cream-100 rounded-lg transition-colors duration-150"
             aria-label="Previous time period"
           >
-            <ChevronLeft className="w-5 h-5" />
+            <ChevronLeft className="w-6 h-6" />
           </button>
         )}
-        
-        {/* Timeline segments */}
-        <div 
-          className="timeline-container flex-1 relative h-32 bg-cream-50 rounded-lg overflow-hidden cursor-pointer timeline-scrollbar border border-cream-200"
+
+        {/* Timeline segments - responsive height */}
+        <div
+          className="timeline-container flex-1 relative h-24 sm:h-32 bg-cream-50 rounded-lg overflow-hidden cursor-pointer timeline-scrollbar border border-cream-200"
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseLeave}
         >
@@ -178,7 +183,7 @@ const Timeline: React.FC<TimelineProps> = ({
         {/* Selection overlay */}
         {isSelecting && selectionStart && selectionEnd && (
           <div 
-            className="absolute top-0 h-full bg-blue-200 bg-opacity-30 pointer-events-none"
+            className="absolute top-0 h-full bg-sage-200 bg-opacity-30 pointer-events-none"
             style={{
               left: `${(Math.min(selectionStart.getTime(), selectionEnd.getTime()) - startTime.getTime()) / totalDuration * 100}%`,
               width: `${Math.abs(selectionEnd.getTime() - selectionStart.getTime()) / totalDuration * 100}%`,
@@ -187,14 +192,14 @@ const Timeline: React.FC<TimelineProps> = ({
         )}
         </div>
         
-        {/* Right Navigation Arrow */}
+        {/* Right Navigation Arrow - touch friendly */}
         {onNavigateNext && (
           <button
             onClick={onNavigateNext}
-            className="flex-shrink-0 w-10 h-10 flex items-center justify-center bg-forest-500 hover:bg-forest-600 text-cream-100 rounded-md transition-colors duration-150"
+            className="flex-shrink-0 w-11 h-11 min-w-11 min-h-11 flex items-center justify-center bg-forest-500 hover:bg-forest-600 text-cream-100 rounded-lg transition-colors duration-150"
             aria-label="Next time period"
           >
-            <ChevronRight className="w-5 h-5" />
+            <ChevronRight className="w-6 h-6" />
           </button>
         )}
       </div>
@@ -213,26 +218,31 @@ const Timeline: React.FC<TimelineProps> = ({
         />
       )}
 
-      {/* Legend */}
-      <div className="flex flex-wrap items-center gap-3 mt-6 p-3 bg-cream-50 rounded-md border border-cream-200">
-        <span className="text-xs font-medium text-forest-600 uppercase tracking-wider">Legend:</span>
-        <div className="flex items-center gap-2">
+      {/* Legend - responsive grid on mobile */}
+      <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 sm:gap-3 mt-4 sm:mt-6 p-3 bg-cream-50 rounded-md border border-cream-200" role="group" aria-label="Content type legend">
+        <span className="text-xs font-medium text-forest-600 uppercase tracking-wider col-span-2 sm:col-span-1 mb-1 sm:mb-0">Legend:</span>
+        <div className="flex items-center gap-1.5">
+          <Circle className="w-3 h-3 text-cream-300" />
           <div className="w-3 h-3 bg-cream-200 rounded-full shadow-sm"></div>
           <span className="text-xs text-forest-600">No data</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          <Image className="w-3 h-3 text-forest-300" />
           <div className="w-3 h-3 bg-forest-300 rounded-full shadow-sm"></div>
           <span className="text-xs text-forest-600">Frames</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          <FileText className="w-3 h-3 text-sage-300" />
           <div className="w-3 h-3 bg-sage-300 rounded-full shadow-sm"></div>
           <span className="text-xs text-forest-600">Transcripts</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          <Layers className="w-3 h-3 text-forest-500" />
           <div className="w-3 h-3 bg-forest-500 rounded-full shadow-sm"></div>
           <span className="text-xs text-forest-600">Both</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          <Tag className="w-3 h-3 text-sage-400" />
           <div className="w-3 h-3 bg-sage-400 rounded-full shadow-sm"></div>
           <span className="text-xs text-forest-600">Annotations</span>
         </div>

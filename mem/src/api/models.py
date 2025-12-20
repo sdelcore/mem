@@ -124,6 +124,9 @@ class TranscriptData(BaseModel):
     language: Optional[str] = None
     start_timestamp: datetime
     end_timestamp: datetime
+    # Speaker identification fields
+    speaker_name: Optional[str] = None
+    speaker_confidence: Optional[float] = None
 
 
 class AnnotationData(BaseModel):
@@ -142,6 +145,9 @@ class TimelineEntry(BaseModel):
 
     timestamp: datetime
     source_id: int
+    source_type: Optional[str] = None
+    source_filename: Optional[str] = None
+    source_location: Optional[str] = None
     frame: Optional[FrameData] = None
     transcript: Optional[TranscriptData] = None
     scene_changed: bool = False
@@ -252,3 +258,153 @@ class AnnotationListResponse(BaseModel):
     count: int
     pagination: Optional[dict[str, Any]] = None
     timestamp: datetime = Field(default_factory=datetime.now)
+
+
+# Voice profile request/response models
+class VoiceProfileResponse(BaseModel):
+    """Response for voice profile operations."""
+
+    profile_id: int
+    name: str
+    display_name: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    metadata: Optional[dict[str, Any]] = None
+
+    @classmethod
+    def from_model(cls, profile: "SpeakerProfile") -> "VoiceProfileResponse":
+        """Create response from SpeakerProfile model."""
+        from src.storage.models import SpeakerProfile
+
+        return cls(
+            profile_id=profile.profile_id,
+            name=profile.name,
+            display_name=profile.display_name,
+            created_at=profile.created_at,
+            updated_at=profile.updated_at,
+            metadata=profile.metadata,
+        )
+
+
+class VoiceProfileListResponse(BaseModel):
+    """Response containing list of voice profiles."""
+
+    profiles: list[VoiceProfileResponse]
+    count: int
+
+
+# Settings request/response models
+
+
+class CaptureFrameSettingsResponse(BaseModel):
+    """Capture frame settings."""
+
+    interval_seconds: int
+    jpeg_quality: int
+    enable_deduplication: bool
+    similarity_threshold: float
+
+
+class CaptureAudioSettingsResponse(BaseModel):
+    """Capture audio settings."""
+
+    chunk_duration_seconds: int
+    sample_rate: int
+
+
+class CaptureSettingsResponse(BaseModel):
+    """Combined capture settings."""
+
+    frame: CaptureFrameSettingsResponse
+    audio: CaptureAudioSettingsResponse
+
+
+class STTDSettingsResponse(BaseModel):
+    """STTD transcription settings."""
+
+    model: str
+    device: str
+    compute_type: str
+    enable_diarization: bool
+    speaker_identification: bool
+    min_speaker_confidence: float
+
+
+class StreamingSettingsResponse(BaseModel):
+    """Streaming settings."""
+
+    frame_interval_seconds: int
+    max_concurrent_streams: int
+
+
+class SettingsResponse(BaseModel):
+    """Full settings response."""
+
+    capture: CaptureSettingsResponse
+    sttd: STTDSettingsResponse
+    streaming: StreamingSettingsResponse
+
+
+class CaptureFrameSettingsUpdate(BaseModel):
+    """Update capture frame settings."""
+
+    interval_seconds: Optional[int] = None
+    jpeg_quality: Optional[int] = None
+    enable_deduplication: Optional[bool] = None
+    similarity_threshold: Optional[float] = None
+
+
+class CaptureAudioSettingsUpdate(BaseModel):
+    """Update capture audio settings."""
+
+    chunk_duration_seconds: Optional[int] = None
+    sample_rate: Optional[int] = None
+
+
+class CaptureSettingsUpdate(BaseModel):
+    """Update capture settings."""
+
+    frame: Optional[CaptureFrameSettingsUpdate] = None
+    audio: Optional[CaptureAudioSettingsUpdate] = None
+
+
+class STTDSettingsUpdate(BaseModel):
+    """Update STTD settings."""
+
+    model: Optional[str] = None
+    device: Optional[str] = None
+    compute_type: Optional[str] = None
+    enable_diarization: Optional[bool] = None
+    speaker_identification: Optional[bool] = None
+    min_speaker_confidence: Optional[float] = None
+
+
+class StreamingSettingsUpdate(BaseModel):
+    """Update streaming settings."""
+
+    frame_interval_seconds: Optional[int] = None
+    max_concurrent_streams: Optional[int] = None
+
+
+class UpdateSettingsRequest(BaseModel):
+    """Request to update settings."""
+
+    capture: Optional[CaptureSettingsUpdate] = None
+    sttd: Optional[STTDSettingsUpdate] = None
+    streaming: Optional[StreamingSettingsUpdate] = None
+
+
+class UpdateSettingsResponse(BaseModel):
+    """Response after updating settings."""
+
+    settings: SettingsResponse
+    restart_required: bool
+    restart_reason: Optional[str] = None
+
+
+class DefaultSettingsResponse(BaseModel):
+    """Default settings values."""
+
+    capture: CaptureSettingsResponse
+    sttd: STTDSettingsResponse
+    streaming: StreamingSettingsResponse

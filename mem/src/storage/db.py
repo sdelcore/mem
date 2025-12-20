@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 import duckdb
 
-from src.storage.models import Frame, Source, Timeline, Transcription
+from src.storage.models import Frame, Source, SpeakerProfile, Timeline, Transcription
 
 logger = logging.getLogger(__name__)
 
@@ -331,8 +331,9 @@ class Database:
                 """
                 INSERT INTO transcriptions (
                     source_id, start_timestamp, end_timestamp,
-                    text, confidence, language, whisper_model
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    text, confidence, language, whisper_model,
+                    speaker_id, speaker_name, speaker_confidence
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING transcription_id
                 """,
                 [
@@ -343,6 +344,9 @@ class Database:
                     transcription.confidence,
                     transcription.language,
                     transcription.whisper_model,
+                    transcription.speaker_id,
+                    transcription.speaker_name,
+                    transcription.speaker_confidence,
                 ],
             )
             return result.fetchone()[0]
@@ -495,22 +499,6 @@ class Database:
             )
 
         return transcriptions
-
-    def update_frame_last_seen(self, frame_id: int, timestamp: datetime) -> None:
-        """
-        Update the last seen timestamp for a unique frame.
-
-        Args:
-            frame_id: Frame ID to update
-            timestamp: New last seen timestamp
-        """
-        query = """
-        UPDATE unique_frames
-        SET last_seen_timestamp = ?
-        WHERE frame_id = ?
-        """
-        self.connection.execute(query, [timestamp, frame_id])
-        self.connection.commit()
 
     def update_timeline_transcriptions(
         self,
@@ -917,6 +905,182 @@ class Database:
             logger.info(f"Created {len(annotation_ids)} annotations in batch")
         return annotation_ids
 
+    # Speaker profile operations
+    def create_speaker_profile(self, profile: SpeakerProfile) -> int:
+        """
+        Create a new speaker profile.
+
+        Args:
+            profile: SpeakerProfile model instance
+
+        Returns:
+            Generated profile_id
+        """
+        with self.transaction() as conn:
+            result = conn.execute(
+                """
+                INSERT INTO speaker_profiles (
+                    name, display_name, audio_sample, embedding_data, metadata,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                RETURNING profile_id
+                """,
+                [
+                    profile.name,
+                    profile.display_name,
+                    profile.audio_sample,
+                    profile.embedding_data,
+                    json.dumps(profile.metadata) if profile.metadata else None,
+                    profile.created_at,
+                    profile.updated_at,
+                ],
+            )
+            profile_id = result.fetchone()[0]
+            logger.info(f"Created speaker profile {profile_id} for '{profile.name}'")
+            return profile_id
+
+    def get_speaker_profile(self, profile_id: int) -> Optional[SpeakerProfile]:
+        """
+        Get a specific speaker profile by ID.
+
+        Args:
+            profile_id: Profile identifier
+
+        Returns:
+            SpeakerProfile if found, None otherwise
+        """
+        result = self.connection.execute(
+            "SELECT * FROM speaker_profiles WHERE profile_id = ?", [profile_id]
+        )
+        row = result.fetchone()
+        if row:
+            return SpeakerProfile(
+                profile_id=row[0],
+                name=row[1],
+                display_name=row[2],
+                audio_sample=row[3],
+                embedding_data=row[4],
+                metadata=json.loads(row[5]) if row[5] else None,
+                created_at=row[6],
+                updated_at=row[7],
+            )
+        return None
+
+    def get_speaker_profile_by_name(self, name: str) -> Optional[SpeakerProfile]:
+        """
+        Get a speaker profile by name.
+
+        Args:
+            name: Profile name (unique identifier)
+
+        Returns:
+            SpeakerProfile if found, None otherwise
+        """
+        result = self.connection.execute(
+            "SELECT * FROM speaker_profiles WHERE name = ?", [name]
+        )
+        row = result.fetchone()
+        if row:
+            return SpeakerProfile(
+                profile_id=row[0],
+                name=row[1],
+                display_name=row[2],
+                audio_sample=row[3],
+                embedding_data=row[4],
+                metadata=json.loads(row[5]) if row[5] else None,
+                created_at=row[6],
+                updated_at=row[7],
+            )
+        return None
+
+    def get_speaker_profiles(self) -> list[SpeakerProfile]:
+        """
+        Get all speaker profiles.
+
+        Returns:
+            List of all speaker profiles ordered by name
+        """
+        result = self.connection.execute(
+            "SELECT * FROM speaker_profiles ORDER BY name"
+        )
+        profiles = []
+        for row in result.fetchall():
+            profiles.append(
+                SpeakerProfile(
+                    profile_id=row[0],
+                    name=row[1],
+                    display_name=row[2],
+                    audio_sample=row[3],
+                    embedding_data=row[4],
+                    metadata=json.loads(row[5]) if row[5] else None,
+                    created_at=row[6],
+                    updated_at=row[7],
+                )
+            )
+        return profiles
+
+    def update_speaker_profile(
+        self, profile_id: int, updates: dict[str, Any]
+    ) -> bool:
+        """
+        Update an existing speaker profile.
+
+        Args:
+            profile_id: ID of profile to update
+            updates: Dictionary of fields to update
+
+        Returns:
+            True if updated, False if not found
+        """
+        allowed_fields = ["display_name", "audio_sample", "embedding_data", "metadata"]
+        update_fields = []
+        values = []
+
+        for field, value in updates.items():
+            if field in allowed_fields:
+                if field == "metadata":
+                    value = json.dumps(value) if value else None
+                update_fields.append(f"{field} = ?")
+                values.append(value)
+
+        if not update_fields:
+            return False
+
+        # Always update the updated_at timestamp
+        update_fields.append("updated_at = current_timestamp")
+
+        with self.transaction() as conn:
+            values.append(profile_id)
+            result = conn.execute(
+                f"""
+                UPDATE speaker_profiles
+                SET {', '.join(update_fields)}
+                WHERE profile_id = ?
+                """,
+                values,
+            )
+            return result.rowcount > 0
+
+    def delete_speaker_profile(self, profile_id: int) -> bool:
+        """
+        Delete a speaker profile.
+
+        Args:
+            profile_id: ID of profile to delete
+
+        Returns:
+            True if deleted, False if not found
+        """
+        with self.transaction() as conn:
+            result = conn.execute(
+                "DELETE FROM speaker_profiles WHERE profile_id = ?",
+                [profile_id],
+            )
+            deleted = result.rowcount > 0
+            if deleted:
+                logger.info(f"Deleted speaker profile {profile_id}")
+            return deleted
+
     def reset_database(self):
         """Drop and recreate all tables."""
         # Drop views first
@@ -929,6 +1093,7 @@ class Database:
         self.connection.execute("DROP TABLE IF EXISTS transcriptions")
         self.connection.execute("DROP TABLE IF EXISTS timeframe_annotations")
         self.connection.execute("DROP TABLE IF EXISTS unique_frames")
+        self.connection.execute("DROP TABLE IF EXISTS speaker_profiles")
         self.connection.execute("DROP TABLE IF EXISTS sources")
 
         # Recreate schema

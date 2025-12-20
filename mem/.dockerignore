@@ -1,0 +1,68 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.direnv/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.ruff_cache/
+.mypy_cache/
+
+# Database files (local dev)
+*.db
+*.sqlite
+*.sqlite3
+*.duckdb
+*.duckdb.wal
+
+# Logs and temp
+*.log
+logs/
+/tmp/
+temp/
+data/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation (keep README for reference)
+docs/
+*.md
+!README.md
+
+# Nix files
+flake.nix
+flake.lock
+result
+
+# Local config
+.envrc
+.gitignore
+Makefile
+
+# uv cache
+.uv/
+uv.lock

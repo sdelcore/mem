@@ -22,23 +22,13 @@ JOBS: dict[str, dict[str, Any]] = {}
 
 
 class CaptureService:
-    """Service for handling video capture operations."""
-
     def __init__(self, db_path: str = None):
         self.db_path = db_path or config.database.path
 
     def start_capture(
         self, filepath: str, capture_config: Optional[dict[str, Any]] = None
     ) -> str:
-        """Start video capture processing.
-
-        Args:
-            filepath: Path to video file
-            capture_config: Optional capture configuration
-
-        Returns:
-            Job ID for tracking
-        """
+        """Start video capture processing and return job ID."""
         job_id = str(uuid.uuid4())
 
         # Store job info
@@ -84,20 +74,10 @@ class CaptureService:
         return job_id
 
     def get_job_status(self, job_id: str) -> Optional[dict[str, Any]]:
-        """Get status of a capture job.
-
-        Args:
-            job_id: Job identifier
-
-        Returns:
-            Job status dict or None if not found
-        """
         return JOBS.get(job_id)
 
 
 class SearchService:
-    """Service for handling search and data retrieval operations."""
-
     def __init__(self, db_path: str = None):
         self.db_path = db_path or config.database.path
         self.db = Database(db_path=self.db_path)
@@ -111,18 +91,7 @@ class SearchService:
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
-        """Search timeline entries within a time range.
-
-        Args:
-            start: Start time (local)
-            end: End time (local)
-            source_id: Optional source filter
-            limit: Maximum results
-            offset: Pagination offset
-
-        Returns:
-            Timeline entries with metadata
-        """
+        """Search timeline entries within a time range."""
         # Get timeline entries from database with source information
         query = """
         SELECT
@@ -139,6 +108,8 @@ class SearchService:
             tr.language,
             tr.start_timestamp,
             tr.end_timestamp,
+            tr.speaker_name,
+            tr.speaker_confidence,
             s.source_type,
             s.filename,
             s.location,
@@ -172,16 +143,19 @@ class SearchService:
                         annotations_by_timestamp[timestamp] = []
                     annotations_by_timestamp[timestamp].extend(anns)
 
+        # Note: Voice notes are now stored as transcriptions (source_type='user_recording')
+        # and will appear in the timeline query naturally via the transcriptions table.
+
         entries = []
         for row in results:
             timestamp = row[2]
             entry = {
                 "timestamp": timestamp,
                 "source_id": row[1],
-                "source_type": row[13],  # source_type
-                "source_filename": row[14],  # filename
-                "source_location": row[15],  # location
-                "source_device_id": row[16],  # device_id
+                "source_type": row[15],  # source_type
+                "source_filename": row[16],  # filename
+                "source_location": row[17],  # location
+                "source_device_id": row[18],  # device_id
                 "scene_changed": row[5] < 95.0 if row[5] else False,
                 "annotations": [],  # Always include annotations array
             }
@@ -221,9 +195,14 @@ class SearchService:
                     "language": row[10],
                     "start_timestamp": row[11],
                     "end_timestamp": row[12],
+                    "speaker_name": row[13],
+                    "speaker_confidence": row[14],
                 }
 
             entries.append(entry)
+
+        # Sort entries by timestamp
+        entries.sort(key=lambda e: e["timestamp"])
 
         # Get total count
         count_query = """
@@ -253,16 +232,7 @@ class SearchService:
     def get_frame(
         self, frame_id: int, format: str = "jpeg", size: Optional[str] = None
     ) -> tuple[bytes, str]:
-        """Get frame image data.
-
-        Args:
-            frame_id: Frame identifier
-            format: Output format (jpeg, png)
-            size: Optional size (e.g., '640x480', 'thumb')
-
-        Returns:
-            Tuple of (image_bytes, content_type)
-        """
+        """Get frame image data as (bytes, content_type)."""
         frame = self.db.get_frame(frame_id)
         if not frame:
             raise ValueError(f"Frame {frame_id} not found")
@@ -296,17 +266,7 @@ class SearchService:
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
-        """Search transcripts by text.
-
-        Args:
-            query: Search query text
-            source_id: Optional source filter
-            limit: Maximum results
-            offset: Pagination offset
-
-        Returns:
-            Matching transcripts
-        """
+        """Search transcripts by text."""
         # Simple text search using LIKE
         search_query = """
         SELECT
@@ -371,11 +331,7 @@ class SearchService:
         }
 
     def get_status(self) -> dict[str, Any]:
-        """Get system status and statistics.
-
-        Returns:
-            System status information
-        """
+        """Get system status and statistics."""
         stats = self.db.get_statistics()
 
         # Count active/completed jobs
@@ -412,18 +368,48 @@ class SearchService:
         }
 
     def __del__(self):
-        """Cleanup database connection."""
         if hasattr(self, "db"):
             self.db.disconnect()
 
 
 class AnnotationService:
-    """Service for handling annotation operations."""
+    # Class-level cache for user annotations source ID
+    _user_annotations_source_id: Optional[int] = None
 
     def __init__(self, db_path: str = None):
         self.db_path = db_path or config.database.path
         self.db = Database(db_path=self.db_path)
         self.db.connect()
+
+    def get_or_create_user_annotations_source(self) -> int:
+        """Get or create a source record for user annotations."""
+        if AnnotationService._user_annotations_source_id is not None:
+            return AnnotationService._user_annotations_source_id
+
+        # Check if source exists
+        result = self.db.connection.execute(
+            "SELECT source_id FROM sources WHERE source_type = 'user_recording' AND filename = 'user_annotations' LIMIT 1"
+        ).fetchone()
+
+        if result:
+            AnnotationService._user_annotations_source_id = result[0]
+            return result[0]
+
+        # Create new source
+        from src.storage.models import Source
+        now = datetime.utcnow()
+        source = Source(
+            type="user_recording",
+            filename="user_annotations",
+            location="user_created",
+            start_timestamp=now,
+            end_timestamp=now,
+            metadata={"description": "User-created text annotations"},
+        )
+        source_id = self.db.create_source(source)
+        AnnotationService._user_annotations_source_id = source_id
+        logger.info(f"Created user annotations source with ID {source_id}")
+        return source_id
 
     def create_annotation(
         self,
@@ -547,109 +533,183 @@ class AnnotationService:
             self.db.disconnect()
 
 
-class StreamingService:
-    """Service for handling streaming operations."""
+class UserRecordingService:
+    """Service for creating user recordings (voice) as transcriptions."""
 
-    def __init__(self):
-        """Initialize streaming service with RTMP server."""
-        self.rtmp_server = RTMPServer(
+    # Class-level cache for user recording source ID
+    _user_recording_source_id: Optional[int] = None
+
+    def __init__(self, db_path: str = None):
+        self.db_path = db_path or config.database.path
+        self.db = Database(db_path=self.db_path)
+        self.db.connect()
+        self._transcriber = None
+
+    @property
+    def transcriber(self):
+        """Lazy load transcriber to avoid loading model until needed."""
+        if self._transcriber is None:
+            from src.capture.transcriber import Transcriber
+            self._transcriber = Transcriber()
+        return self._transcriber
+
+    def _get_or_create_user_recording_source(self) -> int:
+        """Get or create a source record for user recordings."""
+        if UserRecordingService._user_recording_source_id is not None:
+            return UserRecordingService._user_recording_source_id
+
+        # Check if user recording source exists
+        result = self.db.connection.execute(
+            "SELECT source_id FROM sources WHERE source_type = 'user_recording' LIMIT 1"
+        ).fetchone()
+
+        if result:
+            UserRecordingService._user_recording_source_id = result[0]
+            return result[0]
+
+        # Create a new source for user recordings
+        from src.storage.models import Source
+        now = datetime.utcnow()
+        source = Source(
+            type="user_recording",
+            filename="user_recordings",
+            location="user_recorded",
+            start_timestamp=now,
+            end_timestamp=now,
+            metadata={"description": "User-recorded audio transcriptions"},
+        )
+        source_id = self.db.create_source(source)
+        UserRecordingService._user_recording_source_id = source_id
+        logger.info(f"Created user recording source with ID {source_id}")
+        return source_id
+
+    def create_user_recording(
+        self,
+        audio_path: Path,
+        timestamp: Optional[datetime] = None,
+    ) -> dict[str, Any]:
+        """
+        Create a transcription from user-recorded audio.
+
+        Args:
+            audio_path: Path to the audio file
+            timestamp: Timestamp to anchor the recording (defaults to now)
+
+        Returns:
+            Dictionary with transcription data
+        """
+        from datetime import timedelta
+        from src.storage.models import Transcription
+
+        if timestamp is None:
+            timestamp = datetime.utcnow()
+
+        logger.info(f"Creating user recording transcription from {audio_path}")
+
+        # Transcribe with speaker identification
+        result = self.transcriber.transcribe_audio(
+            audio_path,
+            identify_speakers=True
+        )
+
+        # Extract primary speaker from segments
+        speaker = self._get_primary_speaker(result.get("segments", []))
+        speaker_confidence = self._get_speaker_confidence(result.get("segments", []))
+
+        # Build transcription text
+        transcription_text = result.get("text", "").strip()
+
+        # Get or create user recording source
+        source_id = self._get_or_create_user_recording_source()
+
+        # Calculate end timestamp based on duration
+        duration = result.get("duration", 0)
+        end_timestamp = timestamp + timedelta(seconds=duration) if duration else timestamp
+
+        # Create Transcription record
+        transcription = Transcription(
+            source_id=source_id,
+            start_timestamp=timestamp,
+            end_timestamp=end_timestamp,
+            text=transcription_text,
+            confidence=result.get("confidence"),
+            language=result.get("language", "en"),
+            whisper_model=result.get("model", "base"),
+            speaker_name=speaker,
+            speaker_confidence=speaker_confidence,
+        )
+
+        transcription_id = self.db.store_transcription(transcription)
+
+        logger.info(f"Created user recording transcription {transcription_id} with speaker: {speaker}")
+
+        return {
+            "transcription_id": transcription_id,
+            "transcription": transcription_text,
+            "speaker": speaker,
+            "timestamp": timestamp.isoformat(),
+            "duration": duration,
+            "metadata": {
+                "duration": duration,
+                "language": result.get("language", "en"),
+            },
+        }
+
+    def _get_primary_speaker(self, segments: list) -> Optional[str]:
+        """Extract the primary (most frequent) speaker from segments."""
+        if not segments:
+            return None
+
+        speaker_counts: dict[str, int] = {}
+        for segment in segments:
+            speaker = None
+            if isinstance(segment, dict):
+                speaker = segment.get("speaker")
+            elif hasattr(segment, "speaker"):
+                speaker = segment.speaker
+
+            if speaker and speaker != "Unknown":
+                speaker_counts[speaker] = speaker_counts.get(speaker, 0) + 1
+
+        if not speaker_counts:
+            return None
+
+        return max(speaker_counts, key=speaker_counts.get)
+
+    def _get_speaker_confidence(self, segments: list) -> Optional[float]:
+        """Get average speaker confidence from segments."""
+        confidences = []
+        for segment in segments:
+            confidence = None
+            if isinstance(segment, dict):
+                confidence = segment.get("speaker_confidence")
+            elif hasattr(segment, "speaker_confidence"):
+                confidence = segment.speaker_confidence
+
+            if confidence is not None:
+                confidences.append(confidence)
+
+        if not confidences:
+            return None
+
+        return sum(confidences) / len(confidences)
+
+    def __del__(self):
+        """Cleanup database connection."""
+        if hasattr(self, "db"):
+            self.db.disconnect()
+
+
+# Keep VoiceNoteService as alias for backwards compatibility during transition
+VoiceNoteService = UserRecordingService
+
+
+def get_rtmp_server() -> RTMPServer:
+    """Get the shared RTMP server instance."""
+    global _rtmp_server
+    if "_rtmp_server" not in globals():
+        _rtmp_server = RTMPServer(
             port=config.streaming.rtmp.port,
             max_streams=config.streaming.rtmp.max_concurrent_streams,
         )
-
-    def create_stream(
-        self, name: Optional[str] = None, metadata: Optional[dict] = None
-    ) -> StreamSession:
-        """
-        Create a new stream session.
-
-        Args:
-            name: Optional stream name
-            metadata: Optional metadata
-
-        Returns:
-            StreamSession object
-        """
-        session = self.rtmp_server.create_session(stream_name=name)
-        if metadata:
-            # Store metadata in session (would need to extend StreamSession)
-            pass
-        return session
-
-    def start_stream(self, stream_key: str) -> bool:
-        """
-        Start receiving stream.
-
-        Args:
-            stream_key: Stream key to start
-
-        Returns:
-            True if started successfully
-        """
-        return self.rtmp_server.start_stream(stream_key)
-
-    def stop_stream(self, stream_key: str) -> bool:
-        """
-        Stop an active stream.
-
-        Args:
-            stream_key: Stream key to stop
-
-        Returns:
-            True if stopped successfully
-        """
-        return self.rtmp_server.stop_stream(stream_key)
-
-    def get_session(self, stream_key: str) -> Optional[StreamSession]:
-        """
-        Get a stream session by key.
-
-        Args:
-            stream_key: Stream key
-
-        Returns:
-            StreamSession or None
-        """
-        return self.rtmp_server.get_session(stream_key)
-
-    def get_all_sessions(self) -> list[StreamSession]:
-        """
-        Get all stream sessions.
-
-        Returns:
-            List of StreamSession objects
-        """
-        return self.rtmp_server.get_all_sessions()
-
-    def delete_session(self, stream_key: str) -> bool:
-        """
-        Delete a stream session.
-
-        Args:
-            stream_key: Stream key to delete
-
-        Returns:
-            True if deleted
-        """
-        return self.rtmp_server.delete_session(stream_key)
-
-    def get_rtmp_url(self, stream_key: str) -> str:
-        """
-        Get RTMP URL for a stream.
-
-        Args:
-            stream_key: Stream key
-
-        Returns:
-            RTMP URL string
-        """
-        return self.rtmp_server.get_stream_url(stream_key)
-
-    def get_status(self) -> dict[str, Any]:
-        """
-        Get streaming server status.
-
-        Returns:
-            Status dictionary
-        """
-        return self.rtmp_server.get_status()
+    return _rtmp_server

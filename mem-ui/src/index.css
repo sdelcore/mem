@@ -104,7 +104,7 @@
 
 .skeleton {
   animation: shimmer 2s infinite;
-  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background: linear-gradient(90deg, #f8f6f0 25%, #ECE3CE 50%, #f8f6f0 75%);
   background-size: 1000px 100%;
 }
 
@@ -118,6 +118,21 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+@keyframes slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-down {
+  animation: slide-down 0.2s ease-out;
 }
 
 /* React DatePicker Custom Styles */
@@ -196,4 +211,55 @@
 
 .earthy-calendar .react-datepicker__day--disabled {
   @apply text-forest-600 cursor-not-allowed opacity-50;
+}
+
+/* Component Utility Classes */
+@layer components {
+  /* Content Type Badges */
+  .badge-frame {
+    @apply px-2 py-0.5 bg-forest-50 text-forest-300 text-xs rounded;
+  }
+
+  .badge-transcript {
+    @apply px-2 py-0.5 bg-sage-50 text-sage-500 text-xs rounded;
+  }
+
+  .badge-annotation {
+    @apply px-2 py-0.5 bg-cream-200 text-sage-400 text-xs rounded;
+  }
+
+  /* Selection Overlay */
+  .selection-overlay {
+    @apply bg-sage-200 bg-opacity-30;
+  }
+
+  /* Search Highlight */
+  .search-highlight {
+    @apply bg-cream-300 font-medium;
+  }
+
+  /* Timeline Skeleton */
+  .timeline-skeleton {
+    @apply h-32 rounded-lg overflow-hidden;
+    background: linear-gradient(90deg, #f8f6f0 25%, #ECE3CE 50%, #f8f6f0 75%);
+    background-size: 1000px 100%;
+    animation: shimmer 2s infinite;
+  }
+
+  /* Content Card Sections */
+  .card-section-transcript {
+    @apply bg-sage-50;
+  }
+
+  .card-section-transcript-header {
+    @apply bg-sage-100;
+  }
+
+  .card-section-annotation {
+    @apply bg-cream-100;
+  }
+
+  .card-section-annotation-header {
+    @apply bg-cream-200;
+  }
 }

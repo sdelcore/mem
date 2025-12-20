@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { Search, X, Clock } from 'lucide-react'
 import { debounce } from '../../utils/debounce'
+import { API_BASE_URL } from '../../utils/config'
 
 interface SearchResult {
   id: string
@@ -29,9 +30,13 @@ const SearchBar: React.FC<SearchBarProps> = ({
   const searchRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Debounced search function
-  const debouncedSearch = useCallback(
-    debounce(async (searchQuery: string) => {
+  // Store onSearch in a ref to avoid recreating debounced function
+  const onSearchRef = useRef(onSearch)
+  onSearchRef.current = onSearch
+
+  // Debounced search function - use useMemo to avoid recreating on every render
+  const debouncedSearch = useMemo(
+    () => debounce(async (searchQuery: string) => {
       if (searchQuery.trim().length < 2) {
         setResults([])
         setShowResults(false)
@@ -39,12 +44,11 @@ const SearchBar: React.FC<SearchBarProps> = ({
       }
 
       setIsSearching(true)
-      onSearch(searchQuery)
+      onSearchRef.current(searchQuery)
 
       try {
-        const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
         const response = await fetch(
-          `${backendUrl}/api/search?type=transcript&q=${encodeURIComponent(searchQuery)}`
+          `${API_BASE_URL}/api/search?type=transcript&q=${encodeURIComponent(searchQuery)}`
         )
 
         if (!response.ok) {
@@ -61,7 +65,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
         }))
 
         setResults(searchResults)
-        setShowResults(searchResults.length > 0)
+        setShowResults(true)  // Show results dropdown even if empty (to show "no results" message)
         setSelectedIndex(-1)
       } catch (error) {
         console.error('Search error:', error)
@@ -71,7 +75,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
         setIsSearching(false)
       }
     }, 300),
-    [onSearch]
+    [] // Empty deps - function is stable
   )
 
   useEffect(() => {
@@ -105,7 +109,8 @@ const SearchBar: React.FC<SearchBarProps> = ({
       onResultClick(result.timestamp)
     }
     setShowResults(false)
-    setQuery('')
+    // Keep query visible so user can see what they searched for
+    // They can clear manually with the X button
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -141,7 +146,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
     const parts = text.split(new RegExp(`(${highlight})`, 'gi'))
     return parts.map((part, index) =>
       part.toLowerCase() === highlight.toLowerCase() ? (
-        <mark key={index} className="bg-yellow-200 font-medium">
+        <mark key={index} className="bg-cream-300 font-medium">
           {part}
         </mark>
       ) : (
@@ -159,10 +164,10 @@ const SearchBar: React.FC<SearchBarProps> = ({
   }
 
   return (
-    <div ref={searchRef} className="relative w-full max-w-sm">
-      {/* Search input */}
+    <div ref={searchRef} className="relative w-full sm:max-w-sm">
+      {/* Search input - touch friendly */}
       <div className="relative group">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-sage-400 w-4 h-4 transition-colors group-focus-within:text-forest-500" />
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-sage-400 w-5 h-5 transition-colors group-focus-within:text-forest-500" />
         <input
           ref={inputRef}
           type="text"
@@ -170,14 +175,14 @@ const SearchBar: React.FC<SearchBarProps> = ({
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="w-full pl-9 pr-9 py-2 bg-cream-100 border border-cream-200 rounded-lg text-sm text-forest-700 focus:outline-none focus:ring-2 focus:ring-sage-300/30 focus:border-sage-300 focus:bg-white transition-colors duration-150"
+          className="w-full pl-10 pr-10 py-2.5 min-h-11 bg-cream-100 border border-cream-200 rounded-lg text-sm text-forest-700 focus:outline-none focus:ring-2 focus:ring-sage-300/30 focus:border-sage-300 focus:bg-white transition-colors duration-150"
         />
         {query && !isSearching && (
           <button
             onClick={handleClear}
-            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-sage-400 hover:text-forest-600 p-1 rounded-lg hover:bg-cream-100 transition-colors"
+            className="absolute right-1 top-1/2 transform -translate-y-1/2 text-sage-400 hover:text-forest-600 p-2 min-h-9 min-w-9 rounded-lg hover:bg-cream-100 transition-colors flex items-center justify-center"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-4 h-4" />
           </button>
         )}
         {isSearching && (
@@ -190,14 +195,14 @@ const SearchBar: React.FC<SearchBarProps> = ({
         )}
       </div>
 
-      {/* Search results dropdown */}
+      {/* Search results dropdown - responsive height */}
       {showResults && results.length > 0 && (
-        <div className="absolute top-full mt-2 w-full bg-white border border-cream-200 rounded-lg shadow-flat max-h-96 overflow-y-auto z-50">
+        <div className="absolute top-full mt-2 w-full bg-white border border-cream-200 rounded-lg shadow-flat max-h-[60vh] sm:max-h-96 overflow-y-auto z-50">
           {results.map((result, index) => (
             <div
               key={result.id}
-              className={`px-4 py-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors ${
-                index === selectedIndex ? 'bg-blue-50' : ''
+              className={`px-4 py-3 min-h-14 border-b border-cream-200 hover:bg-cream-50 cursor-pointer transition-colors active:bg-cream-100 ${
+                index === selectedIndex ? 'bg-sage-50' : ''
               }`}
               onClick={() => handleResultClick(result)}
               onMouseEnter={() => setSelectedIndex(index)}
@@ -205,21 +210,21 @@ const SearchBar: React.FC<SearchBarProps> = ({
               <div className="flex items-start justify-between">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <Clock className="w-4 h-4 text-gray-400" />
-                    <span className="text-sm text-gray-600">
+                    <Clock className="w-4 h-4 text-sage-400" />
+                    <span className="text-sm text-forest-600">
                       {formatTimestamp(result.timestamp)}
                     </span>
                     <span
                       className={`text-xs px-2 py-0.5 rounded ${
                         result.type === 'transcript'
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-orange-100 text-orange-700'
+                          ? 'bg-sage-50 text-sage-500'
+                          : 'bg-cream-200 text-sage-400'
                       }`}
                     >
                       {result.type}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-800 line-clamp-2">
+                  <p className="text-sm text-forest-700 line-clamp-2">
                     {highlightText(result.text, result.highlight || query)}
                   </p>
                 </div>
@@ -232,8 +237,11 @@ const SearchBar: React.FC<SearchBarProps> = ({
       {/* No results message */}
       {showResults && results.length === 0 && query.trim().length >= 2 && !isSearching && (
         <div className="absolute top-full mt-2 w-full bg-white border border-cream-200 rounded-lg shadow-flat p-4 z-50">
-          <p className="text-sm text-gray-500 text-center">
+          <p className="text-sm text-sage-500 text-center mb-2">
             No results found for "{query}"
+          </p>
+          <p className="text-xs text-sage-400 text-center">
+            Try shorter keywords or check spelling
           </p>
         </div>
       )}

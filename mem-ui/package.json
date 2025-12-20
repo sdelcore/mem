@@ -20,10 +20,10 @@
     "react": "^18.2.0",
     "react-datepicker": "^8.7.0",
     "react-dom": "^18.2.0",
-    "react-dropzone": "^14.2.0"
+    "react-dropzone": "^14.2.0",
+    "react-router-dom": "^7.11.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.55.0",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^14.0.0",
     "@types/react": "^18.2.0",

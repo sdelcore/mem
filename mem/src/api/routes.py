@@ -1,5 +1,6 @@
 """API route definitions."""
 
+import json
 import logging
 import re
 from datetime import datetime, timedelta
@@ -7,7 +8,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from src.api.models import (
@@ -19,8 +20,10 @@ from src.api.models import (
     CaptureResponse,
     CreateAnnotationRequest,
     CreateStreamRequest,
+    DefaultSettingsResponse,
     FrameData,
     SearchResponse,
+    SettingsResponse,
     StatusResponse,
     StreamListResponse,
     StreamSessionResponse,
@@ -30,13 +33,21 @@ from src.api.models import (
     TranscriptData,
     TranscriptSearchResponse,
     UpdateAnnotationRequest,
+    UpdateSettingsRequest,
+    UpdateSettingsResponse,
+    VoiceProfileListResponse,
+    VoiceProfileResponse,
 )
 from src.api.services import (
     AnnotationService,
     CaptureService,
     SearchService,
-    StreamingService,
+    VoiceNoteService,
+    get_rtmp_server,
 )
+from src.api.settings import SettingsService
+from src.api.voice_profiles import get_voice_profile_service
+from src.capture.stream_server import StreamSession
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +58,30 @@ router = APIRouter()
 capture_service = CaptureService()
 search_service = SearchService()
 annotation_service = AnnotationService()
-streaming_service = StreamingService()
+settings_service = SettingsService()
+
+
+def _build_stream_response(session: StreamSession) -> StreamSessionResponse:
+    """Build a StreamSessionResponse from a StreamSession."""
+    rtmp_server = get_rtmp_server()
+    return StreamSessionResponse(
+        session_id=session.session_id,
+        stream_key=session.stream_key,
+        name=session.stream_name,
+        status=session.status,
+        source_id=session.source_id,
+        rtmp_url=rtmp_server.get_stream_url(session.stream_key),
+        started_at=session.started_at,
+        ended_at=session.ended_at,
+        resolution=f"{session.width}x{session.height}" if session.width else None,
+        frames_received=session.frames_received,
+        frames_stored=session.frames_stored,
+        duration=(
+            (datetime.now() - session.started_at).total_seconds()
+            if session.started_at and session.status == "live"
+            else None
+        ),
+    )
 
 
 @router.post("/capture", response_model=CaptureResponse)
@@ -65,23 +99,14 @@ async def capture_video(
         Job ID and status
     """
     try:
-        # Validate filename format (YYYY-MM-DD_HH-MM-SS.mkv)
         filename = file.filename
 
-        # Check file extension
-        if not filename.endswith(".mkv"):
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid file extension. File must be .mkv format",
-            )
-
-        # Check filename format
-        # Pattern: YYYY-MM-DD_HH-MM-SS.mkv
-        pattern = r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.mkv$"
+        # Check filename format: YYYY-MM-DD_HH-MM-SS.(mp4|mkv)
+        pattern = r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.(mp4|mkv)$"
         if not re.match(pattern, filename):
             raise HTTPException(
                 status_code=400,
-                detail="Invalid filename format. Expected: YYYY-MM-DD_HH-MM-SS.mkv",
+                detail="Invalid filename format. Expected: YYYY-MM-DD_HH-MM-SS.mp4 or .mkv",
             )
 
         # Check file size (5GB max)
@@ -117,7 +142,6 @@ async def capture_video(
         )
 
     except HTTPException:
-        # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
         logger.error(f"Capture request failed: {e}")
@@ -186,14 +210,21 @@ async def search(
                 timeline_entry = TimelineEntry(
                     timestamp=entry["timestamp"],
                     source_id=entry["source_id"],
+                    source_type=entry.get("source_type"),
+                    source_filename=entry.get("source_filename"),
+                    source_location=entry.get("source_location"),
                     scene_changed=entry.get("scene_changed", False),
                 )
 
-                if "frame" in entry:
+                if "frame" in entry and entry["frame"]:
                     timeline_entry.frame = FrameData(**entry["frame"])
 
-                if "transcript" in entry:
+                if "transcript" in entry and entry["transcript"]:
                     timeline_entry.transcript = TranscriptData(**entry["transcript"])
+
+                # Add annotations
+                for ann in entry.get("annotations", []):
+                    timeline_entry.annotations.append(AnnotationData(**ann))
 
                 entries.append(timeline_entry)
 
@@ -361,29 +392,25 @@ async def update_annotation(annotation_id: int, request: UpdateAnnotationRequest
             )
 
         # Fetch and return the updated annotation
-        query = (
-            f"SELECT * FROM timeframe_annotations WHERE annotation_id = {annotation_id}"
-        )
-        result = annotation_service.db.connection.execute(query).fetchone()
-        if result:
-            import json
+        result = annotation_service.db.connection.execute(
+            "SELECT * FROM timeframe_annotations WHERE annotation_id = ?",
+            [annotation_id]
+        ).fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="Annotation not found after update")
 
-            return AnnotationResponse(
-                annotation_id=result[0],
-                source_id=result[1],
-                start_timestamp=result[2],
-                end_timestamp=result[3],
-                annotation_type=result[4],
-                content=result[5],
-                metadata=json.loads(result[6]) if result[6] else None,
-                created_by=result[7],
-                created_at=result[8],
-                updated_at=result[9],
-            )
-        else:
-            raise HTTPException(
-                status_code=404, detail="Annotation not found after update"
-            )
+        return AnnotationResponse(
+            annotation_id=result[0],
+            source_id=result[1],
+            start_timestamp=result[2],
+            end_timestamp=result[3],
+            annotation_type=result[4],
+            content=result[5],
+            metadata=json.loads(result[6]) if result[6] else None,
+            created_by=result[7],
+            created_at=result[8],
+            updated_at=result[9],
+        )
 
     except HTTPException:
         raise
@@ -504,40 +531,59 @@ async def batch_create_annotations(request: BatchAnnotationRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/annotations/quick")
+async def create_quick_annotation(
+    timestamp: datetime = Query(..., description="Timestamp for the annotation"),
+    content: str = Query(..., description="Annotation content"),
+    annotation_type: str = Query("user_note", description="Annotation type"),
+):
+    """Create an annotation without specifying source_id.
+
+    Auto-assigns to a user_annotations source. Useful for quick notes
+    from the UI without needing to know the source_id.
+
+    Args:
+        timestamp: When the annotation applies
+        content: The annotation text content
+        annotation_type: Type of annotation (default: user_note)
+
+    Returns:
+        Created annotation details
+    """
+    try:
+        source_id = annotation_service.get_or_create_user_annotations_source()
+
+        annotation_id = annotation_service.create_annotation(
+            source_id=source_id,
+            start_timestamp=timestamp,
+            end_timestamp=timestamp,
+            annotation_type=annotation_type,
+            content=content,
+            created_by="user",
+        )
+
+        return {
+            "status": "success",
+            "annotation_id": annotation_id,
+            "source_id": source_id,
+            "timestamp": timestamp.isoformat(),
+            "content": content,
+            "annotation_type": annotation_type,
+        }
+
+    except Exception as e:
+        logger.error(f"Quick create annotation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Stream endpoints
 @router.post("/streams/create", response_model=StreamSessionResponse)
 async def create_stream(request: CreateStreamRequest):
-    """Create a new stream session for OBS Studio.
-
-    Args:
-        request: Stream creation request
-
-    Returns:
-        Stream session details including RTMP URL
-    """
+    """Create a new stream session for OBS Studio."""
     try:
-        session = streaming_service.create_stream(
-            name=request.name, metadata=request.metadata
-        )
-
-        return StreamSessionResponse(
-            session_id=session.session_id,
-            stream_key=session.stream_key,
-            name=session.stream_name,
-            status=session.status,
-            source_id=session.source_id,
-            rtmp_url=streaming_service.get_rtmp_url(session.stream_key),
-            started_at=session.started_at,
-            ended_at=session.ended_at,
-            resolution=f"{session.width}x{session.height}" if session.width else None,
-            frames_received=session.frames_received,
-            frames_stored=session.frames_stored,
-            duration=(
-                (datetime.now() - session.started_at).total_seconds()
-                if session.started_at and session.status == "live"
-                else None
-            ),
-        )
+        rtmp_server = get_rtmp_server()
+        session = rtmp_server.create_session(stream_name=request.name)
+        return _build_stream_response(session)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -547,42 +593,13 @@ async def create_stream(request: CreateStreamRequest):
 
 @router.get("/streams", response_model=StreamListResponse)
 async def list_streams():
-    """List all stream sessions.
-
-    Returns:
-        List of all stream sessions with their status
-    """
+    """List all stream sessions."""
     try:
-        sessions = streaming_service.get_all_sessions()
+        rtmp_server = get_rtmp_server()
+        sessions = rtmp_server.get_all_sessions()
         active_count = sum(1 for s in sessions if s.status == "live")
-
-        stream_responses = []
-        for session in sessions:
-            stream_responses.append(
-                StreamSessionResponse(
-                    session_id=session.session_id,
-                    stream_key=session.stream_key,
-                    name=session.stream_name,
-                    status=session.status,
-                    source_id=session.source_id,
-                    rtmp_url=streaming_service.get_rtmp_url(session.stream_key),
-                    started_at=session.started_at,
-                    ended_at=session.ended_at,
-                    resolution=(
-                        f"{session.width}x{session.height}" if session.width else None
-                    ),
-                    frames_received=session.frames_received,
-                    frames_stored=session.frames_stored,
-                    duration=(
-                        (datetime.now() - session.started_at).total_seconds()
-                        if session.started_at and session.status == "live"
-                        else None
-                    ),
-                )
-            )
-
         return StreamListResponse(
-            streams=stream_responses,
+            streams=[_build_stream_response(s) for s in sessions],
             active_count=active_count,
             total_count=len(sessions),
         )
@@ -593,123 +610,262 @@ async def list_streams():
 
 @router.get("/streams/{stream_key}", response_model=StreamSessionResponse)
 async def get_stream(stream_key: str):
-    """Get details for a specific stream session.
-
-    Args:
-        stream_key: Stream key identifier
-
-    Returns:
-        Stream session details
-    """
-    try:
-        session = streaming_service.get_session(stream_key)
-        if not session:
-            raise HTTPException(
-                status_code=404, detail=f"Stream {stream_key} not found"
-            )
-
-        return StreamSessionResponse(
-            session_id=session.session_id,
-            stream_key=session.stream_key,
-            name=session.stream_name,
-            status=session.status,
-            source_id=session.source_id,
-            rtmp_url=streaming_service.get_rtmp_url(session.stream_key),
-            started_at=session.started_at,
-            ended_at=session.ended_at,
-            resolution=f"{session.width}x{session.height}" if session.width else None,
-            frames_received=session.frames_received,
-            frames_stored=session.frames_stored,
-            duration=(
-                (datetime.now() - session.started_at).total_seconds()
-                if session.started_at and session.status == "live"
-                else None
-            ),
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Get stream failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    """Get details for a specific stream session."""
+    rtmp_server = get_rtmp_server()
+    session = rtmp_server.get_session(stream_key)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Stream {stream_key} not found")
+    return _build_stream_response(session)
 
 
 @router.post("/streams/{stream_key}/start")
 async def start_stream(stream_key: str):
-    """Start receiving stream from OBS Studio.
-
-    Args:
-        stream_key: Stream key to start
-
-    Returns:
-        Success status
-    """
-    try:
-        success = streaming_service.start_stream(stream_key)
-        if not success:
-            raise HTTPException(status_code=400, detail="Failed to start stream")
-
-        return {"message": f"Stream {stream_key} started successfully"}
-    except Exception as e:
-        logger.error(f"Start stream failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    """Start receiving stream from OBS Studio."""
+    rtmp_server = get_rtmp_server()
+    if not rtmp_server.start_stream(stream_key):
+        raise HTTPException(status_code=400, detail="Failed to start stream")
+    return {"message": f"Stream {stream_key} started successfully"}
 
 
 @router.post("/streams/{stream_key}/stop")
 async def stop_stream(stream_key: str):
-    """Stop an active stream.
-
-    Args:
-        stream_key: Stream key to stop
-
-    Returns:
-        Success status
-    """
-    try:
-        success = streaming_service.stop_stream(stream_key)
-        if not success:
-            raise HTTPException(
-                status_code=404, detail=f"Stream {stream_key} not found"
-            )
-
-        return {"message": f"Stream {stream_key} stopped successfully"}
-    except Exception as e:
-        logger.error(f"Stop stream failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    """Stop an active stream."""
+    rtmp_server = get_rtmp_server()
+    if not rtmp_server.stop_stream(stream_key):
+        raise HTTPException(status_code=404, detail=f"Stream {stream_key} not found")
+    return {"message": f"Stream {stream_key} stopped successfully"}
 
 
 @router.delete("/streams/{stream_key}")
 async def delete_stream(stream_key: str):
-    """Delete a stream session.
-
-    Args:
-        stream_key: Stream key to delete
-
-    Returns:
-        Success status
-    """
-    try:
-        success = streaming_service.delete_session(stream_key)
-        if not success:
-            raise HTTPException(
-                status_code=404, detail=f"Stream {stream_key} not found"
-            )
-
-        return {"message": f"Stream {stream_key} deleted successfully"}
-    except Exception as e:
-        logger.error(f"Delete stream failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    """Delete a stream session."""
+    rtmp_server = get_rtmp_server()
+    if not rtmp_server.delete_session(stream_key):
+        raise HTTPException(status_code=404, detail=f"Stream {stream_key} not found")
+    return {"message": f"Stream {stream_key} deleted successfully"}
 
 
 @router.get("/streams/status", response_model=StreamStatusResponse)
 async def get_streaming_status():
-    """Get overall streaming server status.
+    """Get overall streaming server status."""
+    rtmp_server = get_rtmp_server()
+    status = rtmp_server.get_status()
+    return StreamStatusResponse(server=status["server"], streams=status["streams"])
 
-    Returns:
-        Server and stream statistics
+
+# Voice profile endpoints
+@router.get("/voice-profiles", response_model=VoiceProfileListResponse)
+async def list_voice_profiles():
+    """List all registered voice profiles."""
+    try:
+        service = get_voice_profile_service()
+        profiles = service.list_profiles()
+        return VoiceProfileListResponse(
+            profiles=[VoiceProfileResponse.from_model(p) for p in profiles],
+            count=len(profiles),
+        )
+    except Exception as e:
+        logger.error(f"Failed to list voice profiles: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/voice-profiles/{profile_id}", response_model=VoiceProfileResponse)
+async def get_voice_profile(profile_id: int):
+    """Get a specific voice profile by ID."""
+    try:
+        service = get_voice_profile_service()
+        profile = service.get_profile(profile_id)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        return VoiceProfileResponse.from_model(profile)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get voice profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/voice-profiles", response_model=VoiceProfileResponse)
+async def create_voice_profile(
+    name: str = Form(..., description="Unique identifier for the profile"),
+    display_name: Optional[str] = Form(None, description="Human-readable name"),
+    file: UploadFile = File(..., description="Audio file for voice registration"),
+):
+    """Create a new voice profile from audio file upload.
+
+    Supported audio formats: wav, mp3, m4a, webm, ogg
+    Recommended audio length: 5-30 seconds of clear speech
     """
     try:
-        status = streaming_service.get_status()
-        return StreamStatusResponse(server=status["server"], streams=status["streams"])
+        # Validate file type
+        allowed_extensions = {".wav", ".mp3", ".m4a", ".webm", ".ogg"}
+        file_ext = Path(file.filename).suffix.lower() if file.filename else ""
+        if file_ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type. Supported: {', '.join(allowed_extensions)}",
+            )
+
+        # Read audio data
+        audio_data = await file.read()
+
+        # Validate minimum file size (roughly 1 second of audio)
+        if len(audio_data) < 10000:  # ~10KB minimum
+            raise HTTPException(
+                status_code=400,
+                detail="Audio file too short. Please provide at least 5 seconds of speech.",
+            )
+
+        # Create profile
+        service = get_voice_profile_service()
+        profile = service.register_from_file(
+            name=name,
+            audio_data=audio_data,
+            display_name=display_name,
+            metadata={"original_filename": file.filename},
+        )
+        return VoiceProfileResponse.from_model(profile)
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Get streaming status failed: {e}")
+        logger.error(f"Failed to create voice profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/voice-profiles/{profile_id}")
+async def delete_voice_profile(profile_id: int):
+    """Delete a voice profile."""
+    try:
+        service = get_voice_profile_service()
+        if not service.delete_profile(profile_id):
+            raise HTTPException(status_code=404, detail="Profile not found")
+        return {"message": f"Profile {profile_id} deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete voice profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Voice Notes Endpoints
+# ============================================================================
+
+
+@router.post("/voice-notes")
+async def create_voice_note(
+    file: UploadFile = File(..., description="Audio file to transcribe"),
+):
+    """Create a transcription from audio file upload.
+
+    The audio will be transcribed using Whisper and speaker identification
+    will be attempted using registered voice profiles. The result is stored
+    as a transcription (not an annotation).
+
+    Supported audio formats: wav, mp3, m4a, webm, ogg
+    """
+    import tempfile
+    from src.api.services import UserRecordingService
+
+    try:
+        # Validate file type
+        allowed_extensions = {".wav", ".mp3", ".m4a", ".webm", ".ogg"}
+        file_ext = Path(file.filename).suffix.lower() if file.filename else ".webm"
+        if file_ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type. Supported: {', '.join(allowed_extensions)}",
+            )
+
+        # Read audio data
+        audio_data = await file.read()
+
+        # Validate minimum file size
+        if len(audio_data) < 1000:  # ~1KB minimum
+            raise HTTPException(
+                status_code=400,
+                detail="Audio file too short.",
+            )
+
+        # Save to temp file for transcription
+        with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as temp_file:
+            temp_file.write(audio_data)
+            temp_path = Path(temp_file.name)
+
+        try:
+            # Create user recording transcription
+            service = UserRecordingService()
+            result = service.create_user_recording(temp_path)
+
+            return {
+                "status": "success",
+                "transcription_id": result["transcription_id"],
+                "transcription": result["transcription"],
+                "speaker": result["speaker"],
+                "timestamp": result["timestamp"],
+                "duration": result.get("duration"),
+                "metadata": result["metadata"],
+            }
+
+        finally:
+            # Clean up temp file
+            if temp_path.exists():
+                temp_path.unlink()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create voice note: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Settings Endpoints
+# ============================================================================
+
+
+@router.get("/settings", response_model=SettingsResponse)
+async def get_settings():
+    """Get current application settings.
+
+    Returns all configurable settings for capture, transcription, and streaming.
+    """
+    try:
+        return settings_service.get_settings()
+    except Exception as e:
+        logger.error(f"Failed to get settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/settings", response_model=UpdateSettingsResponse)
+async def update_settings(request: UpdateSettingsRequest):
+    """Update application settings.
+
+    Updates settings and persists them to config.yaml.
+    Returns updated settings and indicates if restart is required.
+
+    Note: Some settings (like Whisper model, device) require a restart
+    to take effect. The response will indicate which settings require restart.
+    """
+    try:
+        return settings_service.update_settings(request)
+    except Exception as e:
+        logger.error(f"Failed to update settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/settings/defaults", response_model=DefaultSettingsResponse)
+async def get_default_settings():
+    """Get default settings values.
+
+    Returns the default values for all settings, which can be used
+    to reset settings to their original state.
+    """
+    try:
+        return settings_service.get_defaults()
+    except Exception as e:
+        logger.error(f"Failed to get default settings: {e}")
         raise HTTPException(status_code=500, detail=str(e))

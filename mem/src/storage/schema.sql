@@ -8,7 +8,7 @@
 CREATE SEQUENCE IF NOT EXISTS sources_seq START 1;
 CREATE TABLE IF NOT EXISTS sources (
     source_id BIGINT PRIMARY KEY DEFAULT nextval('sources_seq'),
-    source_type VARCHAR NOT NULL CHECK (source_type IN ('video', 'stream', 'webcam')),
+    source_type VARCHAR NOT NULL CHECK (source_type IN ('video', 'stream', 'webcam', 'user_recording')),
     filename VARCHAR NOT NULL,
     location VARCHAR,  -- 'front_door', 'office', etc.
     device_id VARCHAR,  -- Camera identifier
@@ -59,6 +59,10 @@ CREATE TABLE IF NOT EXISTS transcriptions (
     has_overlap BOOLEAN DEFAULT FALSE,  -- Whether this chunk has overlap regions
     overlap_start TIMESTAMPTZ,  -- Start of overlap with previous chunk (if any)
     overlap_end TIMESTAMPTZ,    -- End of overlap with next chunk (if any)
+    -- Speaker identification fields (sttd diarization)
+    speaker_id BIGINT,          -- Reference to speaker_profiles
+    speaker_name VARCHAR(255),   -- Speaker name at time of transcription
+    speaker_confidence DOUBLE,   -- Confidence of speaker identification (0-1)
     FOREIGN KEY (source_id) REFERENCES sources(source_id)
 );
 
@@ -79,6 +83,7 @@ CREATE INDEX IF NOT EXISTS idx_frames_temporal ON frames(source_id, first_seen_t
 -- Transcription temporal indexes
 CREATE INDEX IF NOT EXISTS idx_trans_temporal ON transcriptions(start_timestamp, end_timestamp);
 CREATE INDEX IF NOT EXISTS idx_trans_source ON transcriptions(source_id, start_timestamp);
+CREATE INDEX IF NOT EXISTS idx_trans_speaker ON transcriptions(speaker_id);
 
 -- ============================================================================
 -- VIEWS FOR COMMON QUERIES
@@ -142,6 +147,26 @@ FROM sources s
 JOIN timeline t ON s.source_id = t.source_id
 LEFT JOIN frames f ON t.frame_id = f.frame_id
 GROUP BY s.source_id, s.filename, s.location;
+
+-- ============================================================================
+-- SPEAKER PROFILES FOR VOICE IDENTIFICATION
+-- ============================================================================
+
+-- Speaker profiles: Registered voice profiles for diarization
+CREATE SEQUENCE IF NOT EXISTS speaker_profiles_seq START 1;
+CREATE TABLE IF NOT EXISTS speaker_profiles (
+    profile_id BIGINT PRIMARY KEY DEFAULT nextval('speaker_profiles_seq'),
+    name VARCHAR(255) NOT NULL UNIQUE,  -- Unique identifier (e.g., 'alice', 'bob')
+    display_name VARCHAR(255),           -- Human-readable name
+    audio_sample BLOB,                   -- Original registration audio
+    embedding_data BLOB,                 -- sttd speaker embedding
+    metadata JSON,                       -- Additional profile data
+    created_at TIMESTAMPTZ DEFAULT current_timestamp,
+    updated_at TIMESTAMPTZ DEFAULT current_timestamp
+);
+
+-- Index for speaker profile lookups
+CREATE INDEX IF NOT EXISTS idx_speaker_profiles_name ON speaker_profiles(name);
 
 -- ============================================================================
 -- STREAMING SESSIONS

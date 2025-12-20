@@ -1,78 +1,156 @@
-version: '3.8'
+# Mem Docker Compose Configuration
+# Usage:
+#   GPU mode: docker compose --profile gpu up -d
+#   CPU mode: docker compose --profile cpu up -d
+# Or set COMPOSE_PROFILES in .env file
 
 services:
+  # ============================================================================
+  # Backend - GPU Version (requires NVIDIA GPU)
+  # ============================================================================
   mem-backend:
-    image: registry.sdelcore.com/mem/backend:latest
+    image: registry.sdelcore.com/mem/backend:${TAG:-latest}
     build:
       context: ./mem
       dockerfile: Dockerfile
     container_name: mem-backend
     restart: unless-stopped
-    runtime: nvidia
+    profiles: ["gpu"]
+    devices:
+      - nvidia.com/gpu=all
     environment:
-      - NVIDIA_VISIBLE_DEVICES=0
-      - CUDA_VISIBLE_DEVICES=0
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-0}
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
       - PYTHONUNBUFFERED=1
       - MEM_CONFIG_PATH=/app/config/config.yaml
+      - WHISPER_DEVICE=cuda
+      - WHISPER_COMPUTE_TYPE=float16
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ./data/db:/data/db
       - ./data/uploads:/data/uploads
       - ./data/config:/app/config:ro
       - whisper-models:/home/memuser/.cache/huggingface
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     networks:
       - mem-network
     deploy:
       resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+        limits:
+          memory: 8G
+          cpus: '4'
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/api/health')"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
 
+  # ============================================================================
+  # Backend - CPU Version (no GPU required)
+  # ============================================================================
+  mem-backend-cpu:
+    image: registry.sdelcore.com/mem/backend-cpu:${TAG:-latest}
+    build:
+      context: ./mem
+      dockerfile: Dockerfile.cpu
+    container_name: mem-backend
+    restart: unless-stopped
+    profiles: ["cpu"]
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MEM_CONFIG_PATH=/app/config/config.yaml
+      - WHISPER_DEVICE=cpu
+      - WHISPER_COMPUTE_TYPE=int8
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./data/db:/data/db
+      - ./data/uploads:/data/uploads
+      - ./data/config:/app/config:ro
+      - whisper-models:/home/memuser/.cache/huggingface
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    networks:
+      - mem-network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ============================================================================
+  # Frontend (shared by both profiles)
+  # ============================================================================
   mem-frontend:
-    image: registry.sdelcore.com/mem/frontend:latest
+    image: registry.sdelcore.com/mem/frontend:${TAG:-latest}
     build:
       context: ./mem-ui
       dockerfile: Dockerfile
     container_name: mem-frontend
     restart: unless-stopped
+    profiles: ["gpu", "cpu"]
     ports:
-      - "80:80"
+      - "${FRONTEND_PORT:-80}:80"
+      - "${FRONTEND_HTTPS_PORT:-443}:443"
     networks:
       - mem-network
     depends_on:
-      - mem-backend
+      mem-backend:
+        condition: service_started
+        required: false
+      mem-backend-cpu:
+        condition: service_started
+        required: false
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/health"]
       interval: 30s
       timeout: 3s
       retries: 3
 
+  # ============================================================================
+  # RTMP Streaming Server (shared by both profiles)
+  # ============================================================================
   mem-rtmp:
-    image: registry.sdelcore.com/mem/rtmp:latest
+    image: registry.sdelcore.com/mem/rtmp:${TAG:-latest}
     build:
       context: ./rtmp
       dockerfile: Dockerfile
     container_name: mem-rtmp
     restart: unless-stopped
+    profiles: ["gpu", "cpu"]
     ports:
-      - "1935:1935"
+      - "${RTMP_PORT:-1935}:1935"
+      - "${RTMP_STATS_PORT:-8080}:8080"
     networks:
       - mem-network
     depends_on:
-      - mem-backend
+      mem-backend:
+        condition: service_started
+        required: false
+      mem-backend-cpu:
+        condition: service_started
+        required: false
     volumes:
       - ./data/streams:/data/streams
     environment:
       - BACKEND_URL=http://mem-backend:8000
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2'
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "1935"]
       interval: 30s

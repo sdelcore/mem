@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
@@ -14,11 +14,35 @@ vi.mock('./hooks/useTimeline', () => ({
   }),
 }))
 
+// Mock the useStreams hook
+vi.mock('./hooks/useStreams', () => ({
+  useStreams: () => ({
+    data: { streams: [] },
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}))
+
+// Mock the useVoiceProfiles hook
+vi.mock('./hooks/useVoiceProfiles', () => ({
+  useVoiceProfiles: () => ({
+    data: { profiles: [], count: 0 },
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}))
+
 describe('App', () => {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-    },
+  let queryClient: QueryClient
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
   })
 
   it('renders the main header', () => {
@@ -29,11 +53,11 @@ describe('App', () => {
         React.createElement(App)
       )
     )
-    
-    expect(screen.getByText('Mem Timeline Viewer')).toBeInTheDocument()
+
+    expect(screen.getByText('Mem Timeline')).toBeInTheDocument()
   })
 
-  it('renders timeline section', () => {
+  it('renders date display with today view', () => {
     render(
       React.createElement(
         QueryClientProvider,
@@ -41,8 +65,9 @@ describe('App', () => {
         React.createElement(App)
       )
     )
-    
-    expect(screen.getByText('Timeline')).toBeInTheDocument()
+
+    // Should have a Today button
+    expect(screen.getByText('Today')).toBeInTheDocument()
   })
 
   it('renders search bar', () => {
@@ -53,20 +78,11 @@ describe('App', () => {
         React.createElement(App)
       )
     )
-    
+
     expect(screen.getByPlaceholderText('Search transcripts...')).toBeInTheDocument()
   })
 
-  it('shows loading state when timeline is loading', () => {
-    vi.mock('./hooks/useTimeline', () => ({
-      useTimeline: () => ({
-        data: null,
-        isLoading: true,
-        error: null,
-        refetch: vi.fn(),
-      }),
-    }))
-
+  it('renders view mode buttons', () => {
     render(
       React.createElement(
         QueryClientProvider,
@@ -74,18 +90,14 @@ describe('App', () => {
         React.createElement(App)
       )
     )
+
+    // View mode toggle buttons
+    expect(screen.getByText('6h')).toBeInTheDocument()
+    expect(screen.getByText('12h')).toBeInTheDocument()
+    expect(screen.getByText('24h')).toBeInTheDocument()
   })
 
-  it('shows error state when timeline fails to load', () => {
-    vi.mock('./hooks/useTimeline', () => ({
-      useTimeline: () => ({
-        data: null,
-        isLoading: false,
-        error: new Error('Failed to load'),
-        refetch: vi.fn(),
-      }),
-    }))
-
+  it('renders upload button', () => {
     render(
       React.createElement(
         QueryClientProvider,
@@ -93,5 +105,7 @@ describe('App', () => {
         React.createElement(App)
       )
     )
+
+    expect(screen.getByText(/Upload/i)).toBeInTheDocument()
   })
 })

@@ -5,6 +5,7 @@ import tempfile
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
+from collections import Counter
 from typing import Any, Optional
 
 from PIL import Image
@@ -256,6 +257,22 @@ class VideoCaptureProcessor:
 
         return frame_count
 
+    def _get_primary_speaker(self, segments: list) -> Optional[str]:
+        """Get most frequent speaker from transcription segments."""
+        speakers = [s.get("speaker") for s in segments if s.get("speaker")]
+        if not speakers:
+            return None
+        return Counter(speakers).most_common(1)[0][0]
+
+    def _get_speaker_confidence(self, segments: list) -> Optional[float]:
+        """Calculate average speaker confidence across segments."""
+        confidences = [
+            s.get("speaker_confidence")
+            for s in segments
+            if s.get("speaker_confidence") is not None
+        ]
+        return sum(confidences) / len(confidences) if confidences else None
+
     def _process_audio(
         self, video_path: Path, source_id: int, start_timestamp: datetime
     ) -> int:
@@ -337,10 +354,15 @@ class VideoCaptureProcessor:
                 if text or result.get(
                     "is_non_speech", False
                 ):  # Store non-empty or non-speech
+                    # Get segments for speaker and confidence extraction
+                    segments = result.get("segments", [])
+
                     # Calculate confidence
-                    confidence = self.transcriber.calculate_confidence(
-                        result.get("segments", [])
-                    )
+                    confidence = self.transcriber.calculate_confidence(segments)
+
+                    # Extract speaker information
+                    speaker_name = self._get_primary_speaker(segments)
+                    speaker_confidence = self._get_speaker_confidence(segments)
 
                     # Determine overlap timestamps if any
                     overlap_start_ts = None
@@ -366,6 +388,8 @@ class VideoCaptureProcessor:
                         has_overlap=chunk.get("has_overlap", False),
                         overlap_start=overlap_start_ts,
                         overlap_end=overlap_end_ts,
+                        speaker_name=speaker_name,
+                        speaker_confidence=speaker_confidence,
                         metadata=(
                             {
                                 "is_non_speech": result.get("is_non_speech", False),
@@ -525,9 +549,9 @@ class StreamCaptureProcessor:
                 start_ts = source.start_timestamp
                 if hasattr(start_ts, "tzinfo") and start_ts.tzinfo is not None:
                     # start_timestamp is timezone-aware, make end_timestamp aware too
-                    import pytz
+                    from datetime import timezone
 
-                    end_timestamp = datetime.now(pytz.UTC)
+                    end_timestamp = datetime.now(timezone.utc)
                 elif (
                     hasattr(end_timestamp, "tzinfo")
                     and end_timestamp.tzinfo is not None

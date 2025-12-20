@@ -1,6 +1,20 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ContentViewer from './ContentViewer'
+
+// Create a wrapper with QueryClientProvider for tests
+const createWrapper = () => {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  })
+  return ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  )
+}
 
 describe('ContentViewer', () => {
   const mockData = [
@@ -9,7 +23,10 @@ describe('ContentViewer', () => {
       timestamp: '2024-01-15T10:00:00',
       frame: { url: 'http://example.com/frame1.jpg', hash: 'hash123' },
       transcript: 'First transcript',
-      annotations: ['Annotation 1', 'Annotation 2'],
+      annotations: [
+        { content: 'Annotation 1', annotation_type: 'note' },
+        { content: 'Annotation 2', annotation_type: 'note' },
+      ],
     },
     {
       id: '2',
@@ -24,177 +41,129 @@ describe('ContentViewer', () => {
   ]
 
   it('renders empty state when no data', () => {
-    render(
-      <ContentViewer
-        startTime={new Date('2024-01-15T10:00:00')}
-        data={[]}
-      />
-    )
-    
-    expect(screen.getByText('No content available for this time range')).toBeInTheDocument()
+    render(<ContentViewer startTime={new Date('2024-01-15T10:00:00')} data={[]} />, { wrapper: createWrapper() })
+    expect(screen.getByText('No content in this time range')).toBeInTheDocument()
   })
 
-  it('displays content for time range', () => {
+  it('displays time chunks for time range', () => {
     render(
       <ContentViewer
         startTime={new Date('2024-01-15T10:00:00')}
         endTime={new Date('2024-01-15T10:02:00')}
         data={mockData}
-      />
+      />,
+      { wrapper: createWrapper() }
     )
-    
-    expect(screen.getByText('First transcript')).toBeInTheDocument()
-    expect(screen.getByText(/Content \d+ of \d+/)).toBeInTheDocument()
+    expect(screen.getByText('10:00 - 10:30')).toBeInTheDocument()
+    expect(screen.getByText(/time period/)).toBeInTheDocument()
+    expect(screen.getByText(/total items/)).toBeInTheDocument()
   })
 
-  it('displays frame with image', () => {
-    render(
-      <ContentViewer
-        startTime={new Date('2024-01-15T10:00:00')}
-        data={mockData}
-      />
-    )
-    
-    const img = screen.getByAltText('Frame at 10:00:00')
-    expect(img).toBeInTheDocument()
-    expect(img).toHaveAttribute('src', 'http://example.com/frame1.jpg')
+  it('shows Expand All and Collapse All buttons', () => {
+    render(<ContentViewer startTime={new Date('2024-01-15T10:00:00')} data={mockData} />, { wrapper: createWrapper() })
+    expect(screen.getByText('Expand All')).toBeInTheDocument()
+    expect(screen.getByText('Collapse All')).toBeInTheDocument()
   })
 
-  it('displays transcript text', () => {
-    render(
-      <ContentViewer
-        startTime={new Date('2024-01-15T10:00:00')}
-        data={mockData}
-      />
-    )
-    
-    expect(screen.getByText('First transcript')).toBeInTheDocument()
-    // Check for the transcript header specifically
-    expect(screen.getByText((content, element) => {
-      return element?.className === 'text-sm font-medium text-green-700' && content === 'Transcript'
-    })).toBeInTheDocument()
+  it('expands chunk when clicking header', async () => {
+    render(<ContentViewer startTime={new Date('2024-01-15T10:00:00')} data={mockData} />, { wrapper: createWrapper() })
+
+    const chunkContent = document.querySelector('[id^="chunk-content"]')
+    expect(chunkContent).toHaveClass('opacity-0')
+
+    fireEvent.click(screen.getByText('10:00 - 10:30'))
+
+    await waitFor(() => {
+      expect(chunkContent).toHaveClass('opacity-100')
+    })
   })
 
-  it('displays annotations list', () => {
-    render(
-      <ContentViewer
-        startTime={new Date('2024-01-15T10:00:00')}
-        data={mockData}
-      />
-    )
-    
-    expect(screen.getByText('Annotation 1')).toBeInTheDocument()
-    expect(screen.getByText('Annotation 2')).toBeInTheDocument()
-    // Check for the annotations header specifically
-    expect(screen.getByText((content, element) => {
-      return element?.className === 'text-sm font-medium text-orange-700' && content === 'Annotations'
-    })).toBeInTheDocument()
+  it('displays frame with image when chunk is expanded', async () => {
+    render(<ContentViewer startTime={new Date('2024-01-15T10:00:00')} data={mockData} />, { wrapper: createWrapper() })
+
+    fireEvent.click(screen.getByText('10:00 - 10:30'))
+
+    await waitFor(() => {
+      const img = screen.getByAltText('Frame at 10:00:00')
+      expect(img).toBeInTheDocument()
+      expect(img).toHaveAttribute('src', 'http://example.com/frame1.jpg')
+    })
   })
 
-  it('navigates between content items', () => {
-    render(
-      <ContentViewer
-        startTime={new Date('2024-01-15T10:00:00')}
-        endTime={new Date('2024-01-15T10:05:00')}
-        data={mockData}
-      />
-    )
-    
-    expect(screen.getByText(/Content 1 of \d+/)).toBeInTheDocument()
-    expect(screen.getByText('First transcript')).toBeInTheDocument()
-    
-    // Get all buttons and find the next button (second button)
-    const buttons = screen.getAllByRole('button')
-    const nextButton = buttons[1] // The next button is the second one
-    
-    fireEvent.click(nextButton)
-    expect(screen.getByText(/Content 2 of \d+/)).toBeInTheDocument()
-    expect(screen.getByText('Second transcript')).toBeInTheDocument()
+  it('displays transcript text when chunk is expanded', async () => {
+    render(<ContentViewer startTime={new Date('2024-01-15T10:00:00')} data={mockData} />, { wrapper: createWrapper() })
+
+    fireEvent.click(screen.getByText('10:00 - 10:30'))
+
+    await waitFor(() => {
+      expect(screen.getByText('First transcript')).toBeInTheDocument()
+      expect(screen.getByText('Second transcript')).toBeInTheDocument()
+    })
   })
 
-  it('disables previous button at first item', () => {
-    render(
-      <ContentViewer
-        startTime={new Date('2024-01-15T10:00:00')}
-        data={mockData}
-      />
-    )
-    
-    const buttons = screen.getAllByRole('button')
-    const prevButton = buttons[0] as HTMLButtonElement // First button is previous
-    
-    expect(prevButton).toBeDisabled()
+  it('displays annotations when chunk is expanded', async () => {
+    render(<ContentViewer startTime={new Date('2024-01-15T10:00:00')} data={mockData} />, { wrapper: createWrapper() })
+
+    fireEvent.click(screen.getByText('10:00 - 10:30'))
+
+    await waitFor(() => {
+      expect(screen.getByText('Annotation 1')).toBeInTheDocument()
+      expect(screen.getByText('Annotation 2')).toBeInTheDocument()
+    })
   })
 
-  it('disables next button at last item', () => {
-    render(
-      <ContentViewer
-        startTime={new Date('2024-01-15T10:00:00')}
-        endTime={new Date('2024-01-15T10:05:00')}
-        data={mockData}
-      />
-    )
-    
-    const buttons = screen.getAllByRole('button')
-    const nextButton = buttons[1] as HTMLButtonElement // Second button is next
-    
-    // Navigate to last item
-    fireEvent.click(nextButton)
-    fireEvent.click(nextButton)
-    
-    expect(screen.getByText(/Content 3 of \d+/)).toBeInTheDocument()
-    
-    // After navigating, we need to get the buttons again because the component re-rendered
-    const buttonsAfterNav = screen.getAllByRole('button')
-    const nextButtonAfterNav = buttonsAfterNav[1] as HTMLButtonElement
-    expect(nextButtonAfterNav).toBeDisabled()
+  it('collapses chunk when clicking header again', async () => {
+    render(<ContentViewer startTime={new Date('2024-01-15T10:00:00')} data={mockData} />, { wrapper: createWrapper() })
+
+    const chunkHeader = screen.getByText('10:00 - 10:30')
+
+    fireEvent.click(chunkHeader)
+    await waitFor(() => {
+      expect(screen.getByText('First transcript')).toBeInTheDocument()
+    })
+
+    fireEvent.click(chunkHeader)
+    await waitFor(() => {
+      const chunkContent = screen.getByText('First transcript').closest('[id^="chunk-content"]')
+      expect(chunkContent).toHaveClass('opacity-0')
+    })
   })
 
-  it('handles image loading error', () => {
-    render(
-      <ContentViewer
-        startTime={new Date('2024-01-15T10:00:00')}
-        data={mockData}
-      />
-    )
-    
-    const img = screen.getByAltText('Frame at 10:00:00')
-    fireEvent.error(img)
-    
-    expect(screen.getByText('Failed to load image')).toBeInTheDocument()
+  it('expands all chunks when clicking Expand All', async () => {
+    render(<ContentViewer startTime={new Date('2024-01-15T10:00:00')} data={mockData} />, { wrapper: createWrapper() })
+
+    fireEvent.click(screen.getByText('Expand All'))
+
+    await waitFor(() => {
+      expect(screen.getByText('First transcript')).toBeInTheDocument()
+    })
   })
 
-  it('shows content type indicators', () => {
-    render(
-      <ContentViewer
-        startTime={new Date('2024-01-15T10:00:00')}
-        data={mockData}
-      />
-    )
-    
-    // Check for the color indicators
-    const blueIndicator = document.querySelector('.bg-blue-500')
-    const greenIndicator = document.querySelector('.bg-green-500')
-    const orangeIndicator = document.querySelector('.bg-orange-500')
-    
-    expect(blueIndicator).toBeInTheDocument()
-    expect(greenIndicator).toBeInTheDocument()
-    expect(orangeIndicator).toBeInTheDocument()
-    
-    // Check they are in the indicators section (has specific gap styling)
-    const indicatorsSection = document.querySelector('.flex.items-center.gap-4.text-sm.text-gray-600')
-    expect(indicatorsSection).toBeInTheDocument()
-    expect(indicatorsSection).toContainElement(blueIndicator)
+  it('collapses all chunks when clicking Collapse All', async () => {
+    render(<ContentViewer startTime={new Date('2024-01-15T10:00:00')} data={mockData} />, { wrapper: createWrapper() })
+
+    fireEvent.click(screen.getByText('Expand All'))
+    await waitFor(() => {
+      expect(screen.getByText('First transcript')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('Collapse All'))
+    await waitFor(() => {
+      const chunkContent = screen.getByText('First transcript').closest('[id^="chunk-content"]')
+      expect(chunkContent).toHaveClass('opacity-0')
+    })
+  })
+
+  it('shows content type indicators in chunk header', () => {
+    render(<ContentViewer startTime={new Date('2024-01-15T10:00:00')} data={mockData} />, { wrapper: createWrapper() })
+    const indicators = screen.getAllByTitle(/Has/)
+    expect(indicators.length).toBeGreaterThan(0)
   })
 
   it('filters data to time range correctly', () => {
     const dataWithOutOfRange = [
       ...mockData,
-      {
-        id: '4',
-        timestamp: '2024-01-15T11:00:00',
-        transcript: 'Out of range',
-      },
+      { id: '4', timestamp: '2024-01-15T11:00:00', transcript: 'Out of range' },
     ]
 
     render(
@@ -202,125 +171,99 @@ describe('ContentViewer', () => {
         startTime={new Date('2024-01-15T10:00:00')}
         endTime={new Date('2024-01-15T10:02:00')}
         data={dataWithOutOfRange}
-      />
+      />,
+      { wrapper: createWrapper() }
     )
-    
-    expect(screen.getByText(/Content 1 of \d+/)).toBeInTheDocument()
+
+    expect(screen.getByText(/1 time period/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('10:00 - 10:30'))
     expect(screen.queryByText('Out of range')).not.toBeInTheDocument()
   })
 
   it('opens fullscreen modal when clicking on image', async () => {
-    render(
-      <ContentViewer
-        startTime={new Date('2024-01-15T10:00:00')}
-        data={mockData}
-      />
-    )
-    
-    const img = screen.getByAltText('Frame at 10:00:00')
-    fireEvent.click(img)
-    
+    render(<ContentViewer startTime={new Date('2024-01-15T10:00:00')} data={mockData} />, { wrapper: createWrapper() })
+
+    fireEvent.click(screen.getByText('10:00 - 10:30'))
     await waitFor(() => {
-      expect(screen.getByText('Press ESC or click anywhere to close')).toBeInTheDocument()
+      expect(screen.getByAltText('Frame at 10:00:00')).toBeInTheDocument()
     })
-    
-    // Check if fullscreen image is displayed
-    const fullscreenImg = screen.getAllByAltText('Frame at 10:00:00')[1]
-    expect(fullscreenImg).toBeInTheDocument()
-    expect(fullscreenImg).toHaveClass('max-w-full', 'max-h-[90vh]')
+
+    fireEvent.click(screen.getByAltText('Frame at 10:00:00'))
+
+    await waitFor(() => {
+      expect(screen.getByText(/Press ESC or click outside to close/)).toBeInTheDocument()
+    })
+
+    // Fullscreen modal has the image with specific classes
+    const modal = screen.getByText(/Press ESC/).closest('.fixed')
+    expect(modal?.querySelector('img.max-w-full')).toBeInTheDocument()
   })
 
   it('closes fullscreen modal when clicking close button', async () => {
-    render(
-      <ContentViewer
-        startTime={new Date('2024-01-15T10:00:00')}
-        data={mockData}
-      />
-    )
-    
-    const img = screen.getByAltText('Frame at 10:00:00')
-    fireEvent.click(img)
-    
-    await waitFor(() => {
-      expect(screen.getByText('Press ESC or click anywhere to close')).toBeInTheDocument()
-    })
-    
-    const closeButton = screen.getByLabelText('Close fullscreen')
-    fireEvent.click(closeButton)
-    
-    await waitFor(() => {
-      expect(screen.queryByText('Press ESC or click anywhere to close')).not.toBeInTheDocument()
-    })
-  })
+    render(<ContentViewer startTime={new Date('2024-01-15T10:00:00')} data={mockData} />, { wrapper: createWrapper() })
 
-  it('closes fullscreen modal when clicking background', async () => {
-    render(
-      <ContentViewer
-        startTime={new Date('2024-01-15T10:00:00')}
-        data={mockData}
-      />
-    )
-    
-    const img = screen.getByAltText('Frame at 10:00:00')
-    fireEvent.click(img)
-    
+    fireEvent.click(screen.getByText('10:00 - 10:30'))
     await waitFor(() => {
-      expect(screen.getByText('Press ESC or click anywhere to close')).toBeInTheDocument()
+      expect(screen.getByAltText('Frame at 10:00:00')).toBeInTheDocument()
     })
-    
-    // Find and click the overlay background
-    const overlay = screen.getByText('Press ESC or click anywhere to close').closest('.fixed')
-    if (overlay) {
-      fireEvent.click(overlay)
-    }
-    
+
+    fireEvent.click(screen.getByAltText('Frame at 10:00:00'))
     await waitFor(() => {
-      expect(screen.queryByText('Press ESC or click anywhere to close')).not.toBeInTheDocument()
+      expect(screen.getByText(/Press ESC or click outside to close/)).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByLabelText('Close fullscreen'))
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Press ESC or click outside to close/)).not.toBeInTheDocument()
     })
   })
 
   it('closes fullscreen modal when pressing ESC key', async () => {
-    render(
-      <ContentViewer
-        startTime={new Date('2024-01-15T10:00:00')}
-        data={mockData}
-      />
-    )
-    
-    const img = screen.getByAltText('Frame at 10:00:00')
-    fireEvent.click(img)
-    
+    render(<ContentViewer startTime={new Date('2024-01-15T10:00:00')} data={mockData} />, { wrapper: createWrapper() })
+
+    fireEvent.click(screen.getByText('10:00 - 10:30'))
     await waitFor(() => {
-      expect(screen.getByText('Press ESC or click anywhere to close')).toBeInTheDocument()
+      expect(screen.getByAltText('Frame at 10:00:00')).toBeInTheDocument()
     })
-    
-    fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' })
-    
+
+    fireEvent.click(screen.getByAltText('Frame at 10:00:00'))
     await waitFor(() => {
-      expect(screen.queryByText('Press ESC or click anywhere to close')).not.toBeInTheDocument()
+      expect(screen.getByText(/Press ESC or click outside to close/)).toBeInTheDocument()
+    })
+
+    fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' })
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Press ESC or click outside to close/)).not.toBeInTheDocument()
     })
   })
 
-  it('does not open fullscreen for failed images', () => {
+  it('groups items into 30-minute chunks', () => {
+    const dataAcrossChunks = [
+      { id: '1', timestamp: '2024-01-15T10:00:00', transcript: 'Chunk 1 item' },
+      { id: '2', timestamp: '2024-01-15T10:35:00', transcript: 'Chunk 2 item' },
+    ]
+
     render(
       <ContentViewer
         startTime={new Date('2024-01-15T10:00:00')}
-        data={mockData}
-      />
+        endTime={new Date('2024-01-15T11:00:00')}
+        data={dataAcrossChunks}
+      />,
+      { wrapper: createWrapper() }
     )
-    
-    const img = screen.getByAltText('Frame at 10:00:00')
-    fireEvent.error(img)
-    
-    expect(screen.getByText('Failed to load image')).toBeInTheDocument()
-    
-    // Try to click where the image would be
-    const errorContainer = screen.getByText('Failed to load image').parentElement
-    if (errorContainer) {
-      fireEvent.click(errorContainer)
-    }
-    
-    // Fullscreen modal should not open
-    expect(screen.queryByText('Press ESC or click anywhere to close')).not.toBeInTheDocument()
+
+    expect(screen.getByText(/2 time periods/)).toBeInTheDocument()
+    expect(screen.getByText('10:00 - 10:30')).toBeInTheDocument()
+    expect(screen.getByText('10:30 - 11:00')).toBeInTheDocument()
+  })
+
+  it('has accessible aria attributes on chunk headers', () => {
+    render(<ContentViewer startTime={new Date('2024-01-15T10:00:00')} data={mockData} />, { wrapper: createWrapper() })
+
+    const chunkButton = screen.getByRole('button', { name: /10:00 - 10:30/ })
+    expect(chunkButton).toHaveAttribute('aria-expanded', 'false')
+    expect(chunkButton).toHaveAttribute('aria-controls')
   })
 })

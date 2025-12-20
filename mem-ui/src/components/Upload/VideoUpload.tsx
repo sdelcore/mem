@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react'
 import { Upload, X, CheckCircle, AlertCircle, FileVideo, Clock } from 'lucide-react'
+import { API_BASE_URL } from '../../utils/config'
 
 interface VideoUploadProps {
   onUploadSuccess: (jobId: string) => void
@@ -25,8 +26,8 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const validateFileName = (fileName: string): boolean => {
-    // Expected format: YYYY-MM-DD_HH-MM-SS.mkv
-    const pattern = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.mkv$/
+    // Expected format: YYYY-MM-DD_HH-MM-SS.(mp4|mkv)
+    const pattern = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.(mp4|mkv)$/
     return pattern.test(fileName)
   }
 
@@ -37,22 +38,12 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
     const newFileStatuses: FileStatus[] = []
 
     files.forEach(file => {
-      // Check file extension
-      if (!file.name.endsWith('.mkv')) {
-        newFileStatuses.push({
-          file,
-          status: 'error',
-          error: 'Only .mkv files are accepted'
-        })
-        return
-      }
-
-      // Validate filename format
+      // Validate filename format (includes extension check)
       if (!validateFileName(file.name)) {
         newFileStatuses.push({
           file,
           status: 'error',
-          error: 'Invalid filename format. Expected: YYYY-MM-DD_HH-MM-SS.mkv'
+          error: 'Invalid filename format. Expected: YYYY-MM-DD_HH-MM-SS.mp4 or .mkv'
         })
         return
       }
@@ -89,9 +80,7 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
     formData.append('file', fileStatus.file)
 
     try {
-      const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-      
-      const response = await fetch(`${backendUrl}/api/capture`, {
+      const response = await fetch(`${API_BASE_URL}/api/capture`, {
         method: 'POST',
         body: formData,
       })
@@ -175,7 +164,7 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
           </div>
         )
       case 'success':
-        return <CheckCircle className="w-4 h-4 text-green-500" />
+        return <CheckCircle className="w-4 h-4 text-sage-500" />
       case 'error':
         return <AlertCircle className="w-4 h-4 text-red-500" />
     }
@@ -191,11 +180,11 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
       {/* Upload button */}
       <div className="flex items-center gap-2">
         <button
-          className="flex items-center gap-2 px-4 py-2 bg-forest-500 text-cream-50 rounded-md font-medium text-sm hover:bg-forest-600 transition-colors duration-150"
+          className="flex items-center gap-2 px-4 py-2.5 min-h-11 bg-forest-500 text-cream-50 rounded-lg font-medium text-sm hover:bg-forest-600 transition-colors duration-150"
           onClick={() => fileInputRef.current?.click()}
         >
-          <Upload className="w-4 h-4" />
-          <span>Upload</span>
+          <Upload className="w-5 h-5" />
+          <span className="hidden sm:inline">Upload</span>
           {totalCount > 0 && (
             <span className="ml-1 px-2 py-0.5 bg-forest-600 rounded-full text-xs">
               {totalCount}
@@ -204,7 +193,7 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".mkv"
+            accept=".mp4,.mkv"
             multiple
             onChange={handleFileSelect}
             className="hidden"
@@ -214,31 +203,31 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
         {totalCount > 0 && (
           <button
             onClick={() => setShowFileList(!showFileList)}
-            className="p-2 bg-cream-100 rounded-lg hover:bg-cream-200 transition-colors"
+            className="p-2.5 min-h-11 min-w-11 bg-cream-100 rounded-lg hover:bg-cream-200 transition-colors flex items-center justify-center"
           >
-            <FileVideo className="w-4 h-4 text-forest-600" />
+            <FileVideo className="w-5 h-5 text-forest-600" />
           </button>
         )}
       </div>
 
-      {/* File list */}
+      {/* File list - responsive width */}
       {showFileList && selectedFiles.length > 0 && (
-        <div className="absolute top-full mt-2 right-0 w-96 max-h-96 overflow-y-auto bg-white rounded-lg border border-cream-200 shadow-flat z-50">
+        <div className="fixed inset-x-4 top-20 sm:absolute sm:inset-x-auto sm:top-full sm:mt-2 sm:right-0 sm:w-96 max-w-[400px] max-h-[70vh] sm:max-h-96 overflow-y-auto bg-white rounded-lg border border-cream-200 shadow-flat z-50">
           {/* Header */}
           <div className="sticky top-0 bg-white border-b border-cream-200 px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <h3 className="text-sm font-medium text-forest-700">Upload Queue</h3>
               <div className="flex items-center gap-2 text-xs text-sage-500">
                 {pendingCount > 0 && <span>{pendingCount} pending</span>}
-                {successCount > 0 && <span className="text-green-600">{successCount} completed</span>}
+                {successCount > 0 && <span className="text-sage-500">{successCount} completed</span>}
                 {errorCount > 0 && <span className="text-red-600">{errorCount} failed</span>}
               </div>
             </div>
             <button
               onClick={() => setShowFileList(false)}
-              className="p-1 hover:bg-cream-100 rounded-lg transition-colors"
+              className="p-2 min-h-11 min-w-11 hover:bg-cream-100 rounded-lg transition-colors flex items-center justify-center"
             >
-              <X className="w-4 h-4 text-sage-400" />
+              <X className="w-5 h-5 text-sage-400" />
             </button>
           </div>
 
@@ -259,15 +248,15 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
                       <p className="text-xs text-red-600 mt-1">{fileStatus.error}</p>
                     )}
                     {fileStatus.jobId && (
-                      <p className="text-xs text-green-600 mt-1">Job ID: {fileStatus.jobId}</p>
+                      <p className="text-xs text-sage-500 mt-1">Job ID: {fileStatus.jobId}</p>
                     )}
                   </div>
                   {fileStatus.status === 'pending' && !isUploading && (
                     <button
                       onClick={() => removeFile(fileStatus.file)}
-                      className="p-1 hover:bg-cream-200 rounded-lg transition-colors"
+                      className="p-2 min-h-10 min-w-10 hover:bg-cream-200 rounded-lg transition-colors flex items-center justify-center"
                     >
-                      <X className="w-3 h-3 text-sage-400" />
+                      <X className="w-4 h-4 text-sage-400" />
                     </button>
                   )}
                 </div>
@@ -275,40 +264,40 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
             ))}
           </div>
 
-          {/* Actions */}
-          <div className="sticky bottom-0 bg-white border-t border-cream-200 px-4 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          {/* Actions - stack on mobile */}
+          <div className="sticky bottom-0 bg-white border-t border-cream-200 px-4 py-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               {!isUploading && pendingCount > 0 && (
                 <button
                   onClick={startUpload}
-                  className="px-3 py-1.5 bg-sage-300 text-white text-sm font-medium rounded-md hover:bg-sage-400 transition-colors duration-150"
+                  className="w-full sm:w-auto px-4 py-2.5 min-h-11 bg-sage-300 text-white text-sm font-medium rounded-lg hover:bg-sage-400 transition-colors duration-150"
                 >
                   Upload {pendingCount} file{pendingCount !== 1 ? 's' : ''}
                 </button>
               )}
               {isUploading && (
-                <span className="text-sm text-sage-500">
+                <span className="text-sm text-sage-500 text-center sm:text-left">
                   Uploading {currentUploadIndex + 1} of {pendingCount}...
                 </span>
               )}
-            </div>
-            <div className="flex items-center gap-2">
-              {successCount > 0 && (
-                <button
-                  onClick={clearCompleted}
-                  className="text-xs text-sage-500 hover:text-sage-600"
-                >
-                  Clear completed
-                </button>
-              )}
-              {!isUploading && (
-                <button
-                  onClick={clearAll}
-                  className="text-xs text-red-500 hover:text-red-600"
-                >
-                  Clear all
-                </button>
-              )}
+              <div className="flex items-center justify-center sm:justify-end gap-4">
+                {successCount > 0 && (
+                  <button
+                    onClick={clearCompleted}
+                    className="py-2 px-3 min-h-11 text-sm text-sage-500 hover:text-sage-600"
+                  >
+                    Clear completed
+                  </button>
+                )}
+                {!isUploading && (
+                  <button
+                    onClick={clearAll}
+                    className="py-2 px-3 min-h-11 text-sm text-red-500 hover:text-red-600"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

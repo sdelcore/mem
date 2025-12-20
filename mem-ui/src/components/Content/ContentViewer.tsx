@@ -1,6 +1,19 @@
 import React, { useState, useEffect } from 'react'
 import { format } from 'date-fns'
-import { ChevronLeft, ChevronRight, Image, FileText, Tag, Clock, X, Maximize, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'
+import { ChevronRight, Image, Tag, Clock, X, Maximize, ZoomIn, ZoomOut, RotateCcw, Plus } from 'lucide-react'
+import AddContentModal from './AddContentModal'
+
+interface Annotation {
+  annotation_id?: number
+  annotation_type?: string
+  content: string
+  metadata?: {
+    speaker?: string
+    duration?: number
+  }
+  created_by?: string
+  created_at?: string
+}
 
 interface ContentItem {
   id: string
@@ -14,26 +27,76 @@ interface ContentItem {
     source_id?: number
   }
   transcript?: string
-  annotations?: string[]
+  speaker_name?: string
+  speaker_confidence?: number
+  annotations?: Annotation[]
 }
 
-interface ContentGroup {
-  startIndex: number
-  endIndex: number
-  timestamp: Date
-  items: ContentItem[]  // All items at this timestamp
-  frame?: {
-    url: string
-    hash?: string
-  }
+interface TimeChunk {
+  id: string
+  startTime: Date
+  endTime: Date
+  items: ContentItem[]
+  hasFrames: boolean
+  hasTranscripts: boolean
+  hasAnnotations: boolean
+  frameCount: number
+  transcriptCount: number
+}
+
+const CHUNK_DURATION_MS = 30 * 60 * 1000
+const ZOOM = { MIN: 0.5, MAX: 3, STEP: 0.25, WHEEL_STEP: 0.1 }
+
+const groupIntoChunks = (items: ContentItem[]): TimeChunk[] => {
+  if (items.length === 0) return []
+
+  const sortedItems = [...items].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+  const chunkMap = new Map<number, ContentItem[]>()
+
+  sortedItems.forEach(item => {
+    const itemTime = item.timestamp.getTime()
+    const chunkStart = Math.floor(itemTime / CHUNK_DURATION_MS) * CHUNK_DURATION_MS
+    if (!chunkMap.has(chunkStart)) {
+      chunkMap.set(chunkStart, [])
+    }
+    chunkMap.get(chunkStart)!.push(item)
+  })
+
+  const chunks: TimeChunk[] = []
+  chunkMap.forEach((chunkItems, chunkStartMs) => {
+    chunks.push({
+      id: `chunk-${chunkStartMs}`,
+      startTime: new Date(chunkStartMs),
+      endTime: new Date(chunkStartMs + CHUNK_DURATION_MS),
+      items: chunkItems,
+      hasFrames: chunkItems.some(item => item.frame),
+      hasTranscripts: chunkItems.some(item => item.transcript),
+      hasAnnotations: chunkItems.some(item => item.annotations && item.annotations.length > 0),
+      frameCount: chunkItems.filter(item => item.frame).length,
+      transcriptCount: chunkItems.filter(item => item.transcript).length,
+    })
+  })
+
+  return chunks.sort((a, b) => a.startTime.getTime() - b.startTime.getTime())
+}
+
+interface RawContentData {
+  id?: string
+  timestamp: string | Date
+  source_id?: number
+  source_location?: string
+  source_type?: string
+  frame?: { url: string; hash?: string; source_id?: number }
   transcript?: string
-  annotations?: string[]
+  speaker_name?: string
+  speaker_confidence?: number
+  annotations?: Annotation[] | string[]
 }
 
 interface ContentViewerProps {
   startTime: Date
   endTime?: Date
-  data?: any[]
+  data?: RawContentData[]
 }
 
 const ContentViewer: React.FC<ContentViewerProps> = ({
@@ -42,14 +105,15 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
   data = [],
 }) => {
   const [contentItems, setContentItems] = useState<ContentItem[]>([])
-  const [contentGroups, setContentGroups] = useState<ContentGroup[]>([])
-  const [selectedGroupIndex, setSelectedGroupIndex] = useState(0)
-  const [imageError, setImageError] = useState<string | null>(null)
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [timeChunks, setTimeChunks] = useState<TimeChunk[]>([])
+  const [expandedChunks, setExpandedChunks] = useState<Set<string>>(new Set())
+  const [fullscreenItem, setFullscreenItem] = useState<ContentItem | null>(null)
   const [zoomLevel, setZoomLevel] = useState(1)
   const [imagePosition, setImagePosition] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
+  const [modalOpen, setModalOpen] = useState(false)
+  const [selectedChunkTime, setSelectedChunkTime] = useState<Date | null>(null)
 
   useEffect(() => {
     // Filter data within the time range
@@ -65,117 +129,80 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
 
     // Transform and sort by timestamp
     const transformed: ContentItem[] = filtered
-      .map((item) => ({
-        id: item.id || Math.random().toString(),
-        timestamp: new Date(item.timestamp),
-        source_id: item.source_id,
-        source_location: item.source_location,
-        source_type: item.source_type,
-        frame: item.frame,
-        transcript: item.transcript,
-        annotations: item.annotations,
-      }))
+      .map((item) => {
+        // Normalize annotations - convert strings to Annotation objects
+        const annotations = item.annotations?.map((a: Annotation | string) =>
+          typeof a === 'string' ? { content: a } : a
+        )
+        return {
+          id: item.id || Math.random().toString(),
+          timestamp: new Date(item.timestamp),
+          source_id: item.source_id,
+          source_location: item.source_location,
+          source_type: item.source_type,
+          frame: item.frame,
+          transcript: item.transcript,
+          speaker_name: item.speaker_name,
+          speaker_confidence: item.speaker_confidence,
+          annotations,
+        }
+      })
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
 
-    // Apply last frame tracking - fill in missing frames with the most recent frame
+    // Fill in missing frames with the most recent frame
     let lastFrame: ContentItem['frame'] = undefined
     for (let i = 0; i < transformed.length; i++) {
-      if (transformed[i].frame) {
-        lastFrame = transformed[i].frame
-      } else if (lastFrame) {
-        // Use the last known frame if current timestamp has no frame
-        transformed[i].frame = lastFrame
-      }
+      if (transformed[i].frame) lastFrame = transformed[i].frame
+      else if (lastFrame) transformed[i].frame = lastFrame
     }
-
-    // Group items by timestamp to handle multiple sources
-    const groups: ContentGroup[] = []
-    const timestampGroups = new Map<number, ContentItem[]>()
-    
-    // Group items by timestamp
-    transformed.forEach((item) => {
-      const timeKey = item.timestamp.getTime()
-      if (!timestampGroups.has(timeKey)) {
-        timestampGroups.set(timeKey, [])
-      }
-      timestampGroups.get(timeKey)!.push(item)
-    })
-    
-    // Convert to groups array
-    let index = 0
-    timestampGroups.forEach((items, timestamp) => {
-      const group: ContentGroup = {
-        startIndex: index,
-        endIndex: index + items.length - 1,
-        timestamp: new Date(timestamp),
-        items: items,
-        frame: items[0]?.frame,  // Use first item's frame as default
-        transcript: items.map(item => item.transcript).filter(Boolean).join(' | '),
-        annotations: items.flatMap(item => item.annotations || []),
-      }
-      groups.push(group)
-      index += items.length
-    })
+    const chunks = groupIntoChunks(transformed)
 
     setContentItems(transformed)
-    setContentGroups(groups)
-    setSelectedGroupIndex(0)
-    setImageError(null)
+    setTimeChunks(chunks)
   }, [startTime, endTime, data])
 
-  // Get current item based on content groups
-  const currentGroup = contentGroups[selectedGroupIndex]
-  const currentItem = currentGroup ? {
-    id: contentItems[currentGroup.startIndex]?.id || '',
-    timestamp: currentGroup.timestamp,
-    frame: currentGroup.frame,
-    transcript: currentGroup.transcript,
-    annotations: currentGroup.annotations,
-  } : contentItems[0]
-
-  const handlePrevious = () => {
-    setSelectedGroupIndex((prev) => Math.max(0, prev - 1))
-    setImageError(null)
+  const toggleChunk = (chunkId: string) => {
+    setExpandedChunks(prev => {
+      const next = new Set(prev)
+      next.has(chunkId) ? next.delete(chunkId) : next.add(chunkId)
+      return next
+    })
   }
 
-  const handleNext = () => {
-    setSelectedGroupIndex((prev) => Math.min(contentGroups.length - 1, prev + 1))
-    setImageError(null)
+  const expandAllChunks = () => {
+    setExpandedChunks(new Set(timeChunks.map(c => c.id)))
   }
 
-  const handleImageError = () => {
-    setImageError('Failed to load image')
+  const collapseAllChunks = () => {
+    setExpandedChunks(new Set())
   }
 
-  const handleImageClick = () => {
-    if (currentItem?.frame && !imageError) {
-      setIsFullscreen(true)
+  const handleImageClick = (item: ContentItem) => {
+    if (item?.frame) {
+      setFullscreenItem(item)
     }
   }
 
   const handleCloseFullscreen = () => {
-    setIsFullscreen(false)
+    setFullscreenItem(null)
     setZoomLevel(1)
     setImagePosition({ x: 0, y: 0 })
   }
 
-  const handleZoomIn = () => {
-    setZoomLevel(prev => Math.min(prev + 0.25, 3))
-  }
+  const handleZoomIn = () => setZoomLevel(prev => Math.min(prev + ZOOM.STEP, ZOOM.MAX))
+  const handleZoomOut = () => setZoomLevel(prev => Math.max(prev - ZOOM.STEP, ZOOM.MIN))
+  const handleZoomReset = () => { setZoomLevel(1); setImagePosition({ x: 0, y: 0 }) }
 
-  const handleZoomOut = () => {
-    setZoomLevel(prev => Math.max(prev - 0.25, 0.5))
-  }
-
-  const handleZoomReset = () => {
-    setZoomLevel(1)
-    setImagePosition({ x: 0, y: 0 })
+  const handleOpenAddModal = (chunkTime: Date, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setSelectedChunkTime(chunkTime)
+    setModalOpen(true)
   }
 
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault()
-    const delta = e.deltaY > 0 ? -0.1 : 0.1
-    setZoomLevel(prev => Math.min(Math.max(prev + delta, 0.5), 3))
+    const delta = e.deltaY > 0 ? -ZOOM.WHEEL_STEP : ZOOM.WHEEL_STEP
+    setZoomLevel(prev => Math.min(Math.max(prev + delta, ZOOM.MIN), ZOOM.MAX))
   }
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -198,29 +225,28 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
     setIsDragging(false)
   }
 
-  // Handle ESC key to close fullscreen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isFullscreen) {
-        setIsFullscreen(false)
-      }
+      if (e.key === 'Escape') handleCloseFullscreen()
     }
-
-    if (isFullscreen) {
+    if (fullscreenItem) {
       document.addEventListener('keydown', handleKeyDown)
       return () => document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [isFullscreen])
+  }, [fullscreenItem])
 
-  if (contentGroups.length === 0) {
+  if (timeChunks.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64 text-gray-500">
-        <div className="text-center">
-          <Clock className="w-12 h-12 mx-auto mb-2 text-gray-400" />
-          <p>No content available for this time range</p>
-          <p className="text-sm mt-1">
+      <div className="flex items-center justify-center h-64 text-sage-400">
+        <div className="text-center p-8">
+          <Clock className="w-12 h-12 mx-auto mb-3 text-cream-300" />
+          <p className="text-forest-600 font-medium mb-2">No content in this time range</p>
+          <p className="text-sage-400 text-sm mb-1">
             {format(startTime, 'HH:mm:ss')}
             {endTime && ` - ${format(endTime, 'HH:mm:ss')}`}
+          </p>
+          <p className="text-sage-400 text-xs">
+            Try expanding the view or navigate to a different time period.
           </p>
         </div>
       </div>
@@ -228,185 +254,157 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
   }
 
   return (
-    <div className="space-y-4">
-      {/* Navigation header */}
-      <div className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
-        <button
-          onClick={handlePrevious}
-          disabled={selectedGroupIndex === 0}
-          className="p-2 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          <ChevronLeft className="w-5 h-5" />
-        </button>
-
-        <div className="text-center">
-          <p className="text-sm text-gray-600">
-            Content {selectedGroupIndex + 1} of {contentGroups.length}
-          </p>
-          <p className="text-lg font-medium">
-            {currentItem && format(currentItem.timestamp, 'HH:mm:ss')}
-          </p>
-          {currentGroup && currentGroup.startIndex !== currentGroup.endIndex && (
-            <p className="text-xs text-gray-500">
-              ({currentGroup.endIndex - currentGroup.startIndex + 1} timestamps)
-            </p>
-          )}
+    <div className="space-y-3">
+      {/* Expand/Collapse All Controls */}
+      <div className="flex items-center justify-between bg-cream-50 p-3 rounded-lg">
+        <p className="text-sm text-sage-500">
+          {timeChunks.length} time period{timeChunks.length !== 1 ? 's' : ''} • {contentItems.length} total items
+        </p>
+        <div className="flex gap-2">
+          <button
+            onClick={expandAllChunks}
+            className="text-xs text-forest-600 hover:text-forest-700 px-2 py-1 rounded hover:bg-cream-100 transition-colors"
+          >
+            Expand All
+          </button>
+          <button
+            onClick={collapseAllChunks}
+            className="text-xs text-forest-600 hover:text-forest-700 px-2 py-1 rounded hover:bg-cream-100 transition-colors"
+          >
+            Collapse All
+          </button>
         </div>
-
-        <button
-          onClick={handleNext}
-          disabled={selectedGroupIndex === contentGroups.length - 1}
-          className="p-2 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          <ChevronRight className="w-5 h-5" />
-        </button>
       </div>
 
-      {currentGroup && (
-        <div className="space-y-4">
-          {/* Frames - show multiple if from different sources */}
-          {currentGroup.items.some(item => item.frame) && (
-            <div className="bg-gray-100 rounded-lg overflow-hidden">
-              <div className="flex items-center gap-2 px-4 py-2 bg-gray-200">
-                <Image className="w-4 h-4 text-gray-600" />
-                <span className="text-sm font-medium text-gray-700">
-                  {currentGroup.items.length > 1 ? `Frames (${currentGroup.items.length} sources)` : 'Frame'}
-                </span>
+      {/* Time Chunks */}
+      {timeChunks.map(chunk => {
+        const isExpanded = expandedChunks.has(chunk.id)
+        return (
+          <div key={chunk.id} className="rounded-lg overflow-hidden border border-cream-200">
+            {/* Chunk Header */}
+            <div className="flex items-center justify-between p-3 sm:p-4 bg-cream-100">
+              <button
+                onClick={() => toggleChunk(chunk.id)}
+                aria-expanded={isExpanded}
+                aria-controls={`chunk-content-${chunk.id}`}
+                className="flex items-center gap-3 flex-1 hover:bg-cream-200 -m-2 p-2 rounded-lg transition-colors"
+              >
+                <ChevronRight className={`w-5 h-5 text-forest-600 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} />
+                <div className="text-left">
+                  <p className="font-medium text-forest-700">
+                    {format(chunk.startTime, 'HH:mm')} - {format(chunk.endTime, 'HH:mm')}
+                  </p>
+                  <p className="text-xs text-sage-400">
+                    {chunk.frameCount} frame{chunk.frameCount !== 1 ? 's' : ''}, {chunk.transcriptCount} transcript{chunk.transcriptCount !== 1 ? 's' : ''}
+                  </p>
+                </div>
+              </button>
+
+              {/* Content type indicators and add button */}
+              <div className="flex items-center gap-2">
+                {chunk.hasFrames && (
+                  <div className="w-3 h-3 rounded-full bg-forest-300" title="Has frames" />
+                )}
+                {chunk.hasTranscripts && (
+                  <div className="w-3 h-3 rounded-full bg-sage-300" title="Has transcripts" />
+                )}
+                {chunk.hasAnnotations && (
+                  <div className="w-3 h-3 rounded-full bg-sage-400" title="Has annotations" />
+                )}
+                <button
+                  onClick={(e) => handleOpenAddModal(chunk.startTime, e)}
+                  className="ml-2 p-1.5 rounded-lg bg-forest-100 hover:bg-forest-200 text-forest-600 transition-colors"
+                  title="Add content to this time period"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
               </div>
-              <div className="p-4">
-                {/* Grid layout for multiple frames */}
-                <div className={`grid gap-4 ${currentGroup.items.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                  {currentGroup.items.filter(item => item.frame).map((item, idx) => (
-                    <div key={idx} className="space-y-2">
-                      {/* Source label */}
-                      {currentGroup.items.length > 1 && (
-                        <div className="text-xs text-gray-600 font-medium">
-                          {item.source_location || `Source ${item.source_id}`}
-                        </div>
-                      )}
-                      {imageError ? (
-                        <div className="flex items-center justify-center h-64 text-gray-500 bg-gray-50 rounded">
-                          <div className="text-center">
-                            <Image className="w-12 h-12 mx-auto mb-2 text-gray-400" />
-                            <p>Frame unavailable</p>
-                          </div>
-                        </div>
-                      ) : (
+            </div>
+
+            {/* Chunk Content */}
+            <div
+              id={`chunk-content-${chunk.id}`}
+              className={`overflow-hidden transition-all duration-300 ease-in-out ${
+                isExpanded ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'
+              }`}
+            >
+              <div className="space-y-3 p-3 sm:p-4 bg-cream-50 border-t border-cream-200">
+                {chunk.items.map((item) => (
+                  <div key={item.id} className="flex gap-3 sm:gap-4 p-3 bg-white rounded-lg border border-cream-200">
+                    {/* Timestamp */}
+                    <div className="flex-shrink-0 text-xs text-sage-400 w-14 sm:w-16 pt-1">
+                      {format(item.timestamp, 'HH:mm:ss')}
+                    </div>
+
+                    {/* Frame (left side) */}
+                    <div className="flex-shrink-0 w-24 sm:w-32 md:w-48">
+                      {item.frame ? (
                         <div className="relative group">
                           <img
-                            src={item.frame!.url}
+                            src={item.frame.url}
                             alt={`Frame at ${format(item.timestamp, 'HH:mm:ss')}`}
-                            onError={handleImageError}
-                            onClick={handleImageClick}
-                            className="w-full h-auto rounded-md border border-cream-100 cursor-pointer transition-opacity group-hover:opacity-90"
+                            onClick={() => handleImageClick(item)}
+                            className="w-full h-auto rounded cursor-pointer hover:opacity-90 transition-opacity border border-cream-200"
                           />
                           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                            <div className="bg-black bg-opacity-50 rounded-full p-3">
-                              <Maximize className="w-6 h-6 text-white" />
+                            <div className="bg-black bg-opacity-50 rounded-full p-2">
+                              <Maximize className="w-4 h-4 text-white" />
                             </div>
                           </div>
                         </div>
+                      ) : (
+                        <div className="w-full h-16 sm:h-20 bg-cream-100 rounded flex items-center justify-center border border-cream-200">
+                          <Image className="w-5 h-5 text-cream-300" />
+                        </div>
                       )}
                     </div>
-                  ))}
-                </div>
-                {currentItem?.frame?.hash && (
-                  <p className="text-xs text-gray-500 mt-2">
-                    Hash: {currentItem.frame.hash}
-                  </p>
-                )}
+
+                    {/* Transcript and annotations (right side) */}
+                    <div className="flex-1 space-y-2 min-w-0">
+                      {item.transcript && (
+                        <p className="text-sm text-forest-700 break-words">
+                          {item.speaker_name && (
+                            <span className="font-semibold text-sage-600">[{item.speaker_name}]: </span>
+                          )}
+                          {item.transcript}
+                        </p>
+                      )}
+
+                      {/* Annotations */}
+                      {item.annotations?.map((ann, i) => (
+                        <div key={`ann-${i}`} className="text-xs text-sage-500 flex items-start gap-1">
+                          <Tag className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                          <span className="break-words">{ann.content}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-          )}
-
-          {/* Transcript */}
-          {currentItem.transcript && (
-            <div className="bg-green-50 rounded-lg overflow-hidden">
-              <div className="flex items-center gap-2 px-4 py-2 bg-green-100">
-                <FileText className="w-4 h-4 text-green-600" />
-                <span className="text-sm font-medium text-green-700">
-                  Transcript
-                </span>
-              </div>
-              <div className="p-4">
-                <p className="text-gray-800 whitespace-pre-wrap">
-                  {currentItem.transcript}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Annotations */}
-          {currentItem.annotations && currentItem.annotations.length > 0 && (
-            <div className="bg-orange-50 rounded-lg overflow-hidden">
-              <div className="flex items-center gap-2 px-4 py-2 bg-orange-100">
-                <Tag className="w-4 h-4 text-orange-600" />
-                <span className="text-sm font-medium text-orange-700">
-                  Annotations
-                </span>
-              </div>
-              <div className="p-4">
-                <ul className="space-y-2">
-                  {currentItem.annotations.map((annotation, index) => (
-                    <li key={index} className="flex items-start gap-2">
-                      <span className="text-orange-500 mt-1">•</span>
-                      <span className="text-gray-800">{annotation}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Content type indicators */}
-      <div className="flex items-center gap-4 text-sm text-gray-600">
-        <div className="flex items-center gap-1">
-          <div
-            className={`w-3 h-3 rounded-full ${
-              currentItem?.frame ? 'bg-blue-500' : 'bg-gray-300'
-            }`}
-          />
-          <span>Frame</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <div
-            className={`w-3 h-3 rounded-full ${
-              currentItem?.transcript ? 'bg-green-500' : 'bg-gray-300'
-            }`}
-          />
-          <span>Transcript</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <div
-            className={`w-3 h-3 rounded-full ${
-              currentItem?.annotations?.length ? 'bg-orange-500' : 'bg-gray-300'
-            }`}
-          />
-          <span>Annotations</span>
-        </div>
-      </div>
+          </div>
+        )
+      })}
 
       {/* Fullscreen Modal */}
-      {isFullscreen && currentItem?.frame && (
+      {fullscreenItem?.frame && (
         <div
           className="fixed inset-0 z-50 bg-black bg-opacity-95 flex items-center justify-center p-4"
           onClick={handleCloseFullscreen}
         >
-          {/* Close button */}
+          {/* Close button - touch friendly */}
           <button
-            className="absolute top-4 right-4 text-white hover:text-gray-300 transition-colors z-10"
+            className="absolute top-4 right-4 p-2.5 min-h-11 min-w-11 text-white hover:text-gray-300 transition-colors z-10 flex items-center justify-center"
             onClick={handleCloseFullscreen}
             aria-label="Close fullscreen"
           >
             <X className="w-8 h-8" />
           </button>
-          
-          {/* Zoom controls */}
-          <div className="absolute top-4 left-4 flex items-center gap-2 bg-black bg-opacity-50 rounded-lg p-2 z-10">
+
+          {/* Zoom controls - touch friendly */}
+          <div className="absolute top-4 left-4 flex items-center gap-1 sm:gap-2 bg-black bg-opacity-50 rounded-lg p-1.5 sm:p-2 z-10">
             <button
-              className="text-white hover:text-gray-300 transition-colors p-2 rounded hover:bg-white hover:bg-opacity-10"
+              className="text-white hover:text-gray-300 transition-colors p-2.5 min-h-11 min-w-11 rounded hover:bg-white hover:bg-opacity-10 flex items-center justify-center"
               onClick={(e) => {
                 e.stopPropagation()
                 handleZoomOut()
@@ -415,13 +413,13 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
             >
               <ZoomOut className="w-5 h-5" />
             </button>
-            
-            <span className="text-white text-sm font-medium min-w-[60px] text-center">
+
+            <span className="text-white text-xs sm:text-sm font-medium min-w-[50px] sm:min-w-[60px] text-center">
               {Math.round(zoomLevel * 100)}%
             </span>
-            
+
             <button
-              className="text-white hover:text-gray-300 transition-colors p-2 rounded hover:bg-white hover:bg-opacity-10"
+              className="text-white hover:text-gray-300 transition-colors p-2.5 min-h-11 min-w-11 rounded hover:bg-white hover:bg-opacity-10 flex items-center justify-center"
               onClick={(e) => {
                 e.stopPropagation()
                 handleZoomIn()
@@ -430,11 +428,11 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
             >
               <ZoomIn className="w-5 h-5" />
             </button>
-            
-            <div className="w-px h-6 bg-gray-600 mx-1" />
-            
+
+            <div className="w-px h-6 bg-gray-600 mx-1 hidden sm:block" />
+
             <button
-              className="text-white hover:text-gray-300 transition-colors p-2 rounded hover:bg-white hover:bg-opacity-10"
+              className="text-white hover:text-gray-300 transition-colors p-2.5 min-h-11 min-w-11 rounded hover:bg-white hover:bg-opacity-10 hidden sm:flex items-center justify-center"
               onClick={(e) => {
                 e.stopPropagation()
                 handleZoomReset()
@@ -444,9 +442,9 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
               <RotateCcw className="w-5 h-5" />
             </button>
           </div>
-          
+
           {/* Image container */}
-          <div 
+          <div
             className="relative w-full h-full flex items-center justify-center"
             onClick={(e) => e.stopPropagation()}
             onWheel={handleWheel}
@@ -459,8 +457,8 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
             }}
           >
             <img
-              src={currentItem.frame.url}
-              alt={`Frame at ${format(currentItem.timestamp, 'HH:mm:ss')}`}
+              src={fullscreenItem.frame.url}
+              alt={`Frame at ${format(fullscreenItem.timestamp, 'HH:mm:ss')}`}
               className="max-w-full max-h-[90vh] object-contain select-none transition-transform duration-200"
               style={{
                 transform: `scale(${zoomLevel}) translate(${imagePosition.x / zoomLevel}px, ${imagePosition.y / zoomLevel}px)`,
@@ -469,11 +467,11 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
               draggable={false}
             />
           </div>
-          
+
           {/* Info overlay */}
           <div className="absolute bottom-4 left-4 text-white pointer-events-none">
             <p className="text-lg font-medium">
-              {format(currentItem.timestamp, 'HH:mm:ss')}
+              {format(fullscreenItem.timestamp, 'HH:mm:ss')}
             </p>
             <p className="text-sm text-gray-300 mt-1">
               Scroll to zoom • {zoomLevel > 1 ? 'Drag to pan • ' : ''}Press ESC or click outside to close
@@ -481,6 +479,16 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
           </div>
         </div>
       )}
+
+      {/* Add Content Modal */}
+      <AddContentModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        timestamp={selectedChunkTime || new Date()}
+        onContentCreated={() => {
+          // Modal will close itself, timeline will refresh via query invalidation
+        }}
+      />
     </div>
   )
 }

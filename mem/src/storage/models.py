@@ -10,7 +10,7 @@ class Source(BaseModel):
     """Represents a video/stream source."""
 
     id: Optional[int] = None
-    type: str = Field(..., pattern="^(video|stream|webcam)$")
+    type: str = Field(..., pattern="^(video|stream|webcam|user_recording)$")
     filename: str
     location: Optional[str] = None  # 'front_door', 'office', etc.
     device_id: Optional[str] = None  # Camera identifier
@@ -80,11 +80,28 @@ class Transcription(BaseModel):
     has_overlap: bool = False  # Whether this chunk has overlap regions
     overlap_start: Optional[datetime] = None  # Start of overlap with previous chunk
     overlap_end: Optional[datetime] = None  # End of overlap with next chunk
+    # Speaker identification fields (sttd diarization)
+    speaker_id: Optional[int] = None  # Reference to speaker_profiles
+    speaker_name: Optional[str] = None  # Speaker name at time of transcription
+    speaker_confidence: Optional[float] = None  # Confidence of speaker ID (0-1)
 
     @property
     def word_count(self) -> int:
         """Computed word count from text."""
         return len(self.text.split()) if self.text else 0
+
+
+class SpeakerProfile(BaseModel):
+    """Represents a registered speaker voice profile for diarization."""
+
+    profile_id: Optional[int] = None
+    name: str  # Unique identifier (e.g., 'alice', 'bob')
+    display_name: Optional[str] = None  # Human-readable name
+    audio_sample: Optional[bytes] = None  # Original registration audio
+    embedding_data: Optional[bytes] = None  # sttd speaker embedding
+    metadata: Optional[dict[str, Any]] = None  # Additional profile data
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class FrameAnalysis(BaseModel):

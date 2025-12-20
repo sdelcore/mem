@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { API_BASE_URL } from '../utils/config'
 
 interface TimelineData {
   id: string
@@ -14,6 +15,8 @@ interface TimelineData {
     source_id: number
   }
   transcript?: string
+  speaker_name?: string
+  speaker_confidence?: number
   annotations?: string[]
 }
 
@@ -27,24 +30,21 @@ export const useTimeline = (
   endTime: Date,
   options?: UseTimelineOptions
 ) => {
-  const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-  
   const fetchTimelineData = async (): Promise<TimelineData[]> => {
     const params = new URLSearchParams({
-      type: 'timeline', 
+      type: 'timeline',
       start: startTime.toISOString(),
       end: endTime.toISOString(),
-      limit: '5000',  // Increase limit to get all data for the time period
+      limit: '5000',
     })
-    
-    const response = await fetch(`${backendUrl}/api/search?${params}`)
-    
+
+    const response = await fetch(`${API_BASE_URL}/api/search?${params}`)
+
     if (!response.ok) {
       throw new Error('Failed to fetch timeline data')
     }
-    
+
     const data = await response.json()
-    // Map backend response to frontend format
     return (data.entries || []).map((entry: any) => ({
       id: entry.frame?.frame_id || `${entry.timestamp}_${entry.source_id}`,
       timestamp: entry.timestamp,
@@ -54,11 +54,13 @@ export const useTimeline = (
       source_location: entry.source_location,
       source_device_id: entry.source_device_id,
       frame: entry.frame ? {
-        url: `${backendUrl}/api/search?type=frame&frame_id=${entry.frame.frame_id}`,
+        url: `${API_BASE_URL}/api/search?type=frame&frame_id=${entry.frame.frame_id}`,
         hash: entry.frame.perceptual_hash,
         source_id: entry.frame.source_id
       } : undefined,
       transcript: entry.transcript?.text,
+      speaker_name: entry.transcript?.speaker_name,
+      speaker_confidence: entry.transcript?.speaker_confidence,
       annotations: entry.annotations || []
     }))
   }
@@ -74,15 +76,13 @@ export const useTimeline = (
 }
 
 export const useSearch = (query: string, enabled = true) => {
-  const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-  
   const searchContent = async () => {
     if (!query || query.trim().length < 2) {
       return { results: [] }
     }
-    
+
     const response = await fetch(
-      `${backendUrl}/api/search?type=transcript&q=${encodeURIComponent(query)}`
+      `${API_BASE_URL}/api/search?type=transcript&q=${encodeURIComponent(query)}`
     )
     
     if (!response.ok) {

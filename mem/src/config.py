@@ -33,7 +33,7 @@ class CaptureConfig(BaseModel):
 
 
 class WhisperConfig(BaseModel):
-    """Whisper transcription configuration."""
+    """Whisper transcription configuration (legacy, use STTDConfig instead)."""
 
     model: str = "base"
     language: str = "auto"
@@ -42,6 +42,18 @@ class WhisperConfig(BaseModel):
     detect_non_speech: bool = True
     no_speech_threshold: float = 0.6
     logprob_threshold: float = -1.0
+
+
+class STTDConfig(BaseModel):
+    """STTD (speech-to-text with diarization) configuration."""
+
+    model: str = "large-v3"  # Whisper model size
+    device: str = "cuda"  # cuda or cpu
+    compute_type: str = "float16"  # float16 for GPU, int8 for CPU
+    profiles_path: str = "data/voice_profiles"  # Storage for voice profiles
+    enable_diarization: bool = True  # Enable speaker identification
+    speaker_identification: bool = True  # Identify registered speakers
+    min_speaker_confidence: float = 0.7  # Threshold for speaker ID
 
 
 class DatabaseConfig(BaseModel):
@@ -110,7 +122,8 @@ class Config(BaseModel):
 
     database: DatabaseConfig = DatabaseConfig()
     capture: CaptureConfig = CaptureConfig()
-    whisper: WhisperConfig = WhisperConfig()
+    whisper: WhisperConfig = WhisperConfig()  # Legacy, use sttd
+    sttd: STTDConfig = STTDConfig()
     files: FilesConfig = FilesConfig()
     api: APIConfig = APIConfig()
     streaming: StreamingConfig = StreamingConfig()
@@ -157,6 +170,7 @@ def load_config(path: Optional[Path] = None) -> Config:
                 audio=CaptureAudioConfig(**data.get("capture", {}).get("audio", {})),
             ),
             whisper=WhisperConfig(**data.get("whisper", {})),
+            sttd=STTDConfig(**data.get("sttd", {})),
             files=FilesConfig(**data.get("files", {})),
             api=APIConfig(**data.get("api", {})),
             streaming=StreamingConfig(

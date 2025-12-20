@@ -1,7 +1,16 @@
 # Mem Configuration Example
 
 database:
-  path: mem.duckdb
+  path: /data/db/mem.duckdb
+
+sttd:
+  model: base
+  device: cuda
+  compute_type: float16
+  profiles_path: /data/db/voice_profiles
+  enable_diarization: true
+  speaker_identification: true
+  min_speaker_confidence: 0.7
 
 capture:
   frame:

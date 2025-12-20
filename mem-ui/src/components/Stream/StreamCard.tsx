@@ -67,15 +67,15 @@ const StreamCard: React.FC<StreamCardProps> = ({ stream, onRefresh }) => {
       case 'waiting':
         return (
           <div className="flex items-center space-x-1">
-            <Circle className="w-3 h-3 fill-yellow-500 text-yellow-500" />
-            <span className="text-sm font-medium text-yellow-600">Waiting</span>
+            <Circle className="w-3 h-3 fill-amber-500 text-amber-500" />
+            <span className="text-sm font-medium text-amber-600">Waiting</span>
           </div>
         )
       case 'ended':
         return (
           <div className="flex items-center space-x-1">
-            <Circle className="w-3 h-3 fill-gray-400 text-gray-400" />
-            <span className="text-sm font-medium text-gray-600">Ended</span>
+            <Circle className="w-3 h-3 fill-sage-200 text-sage-200" />
+            <span className="text-sm font-medium text-sage-400">Ended</span>
           </div>
         )
       case 'error':
@@ -156,7 +156,7 @@ const StreamCard: React.FC<StreamCardProps> = ({ stream, onRefresh }) => {
             >
               <Copy className="w-3 h-3 text-forest-600" />
               {copied === 'url' ? (
-                <span className="text-green-600 font-medium">Copied!</span>
+                <span className="text-sage-500 font-medium">Copied!</span>
               ) : (
                 <span className="text-forest-600">Copy</span>
               )}
@@ -177,7 +177,7 @@ const StreamCard: React.FC<StreamCardProps> = ({ stream, onRefresh }) => {
             >
               <Copy className="w-3 h-3 text-forest-600" />
               {copied === 'key' ? (
-                <span className="text-green-600 font-medium">Copied!</span>
+                <span className="text-sage-500 font-medium">Copied!</span>
               ) : (
                 <span className="text-forest-600">Copy</span>
               )}
@@ -188,8 +188,8 @@ const StreamCard: React.FC<StreamCardProps> = ({ stream, onRefresh }) => {
           </p>
         </div>
         
-        <div className="bg-blue-50 border border-blue-200 rounded p-2">
-          <p className="text-xs text-blue-700">
+        <div className="bg-forest-50 border border-forest-200 rounded p-2">
+          <p className="text-xs text-forest-600">
             <strong>OBS Setup:</strong> Use both the Server URL and Stream Key above in your OBS settings.
           </p>
         </div>
@@ -209,18 +209,18 @@ const StreamCard: React.FC<StreamCardProps> = ({ stream, onRefresh }) => {
             <button
               onClick={handleStart}
               disabled={isLoading}
-              className="p-1.5 rounded hover:bg-green-50 text-green-600 disabled:opacity-50"
+              className="p-1.5 rounded hover:bg-sage-50 text-sage-500 disabled:opacity-50"
               title="Start receiving stream"
             >
               <Play className="w-4 h-4" />
             </button>
           )}
-          
+
           {stream.status === 'live' && (
             <button
               onClick={handleStop}
               disabled={isLoading}
-              className="p-1.5 rounded hover:bg-orange-50 text-orange-600 disabled:opacity-50"
+              className="p-1.5 rounded hover:bg-amber-50 text-amber-600 disabled:opacity-50"
               title="Stop stream"
             >
               <Square className="w-4 h-4" />

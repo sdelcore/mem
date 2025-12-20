@@ -67,7 +67,7 @@ const PreviewTooltip: React.FC<PreviewTooltipProps> = ({
       }}
     >
       {/* Timestamp */}
-      <div className="text-sm font-semibold text-gray-900 mb-2">
+      <div className="text-sm font-semibold text-forest-700 mb-2">
         {format(timestamp, 'HH:mm:ss')}
       </div>
 
@@ -85,22 +85,22 @@ const PreviewTooltip: React.FC<PreviewTooltipProps> = ({
       {/* Content indicators */}
       <div className="flex gap-2 text-xs">
         {hasFrame && (
-          <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded">
+          <span className="px-2 py-1 bg-forest-50 text-forest-300 rounded">
             Frame
           </span>
         )}
         {hasTranscript && (
-          <span className="px-2 py-1 bg-green-100 text-green-700 rounded">
+          <span className="px-2 py-1 bg-sage-50 text-sage-500 rounded">
             Transcript
           </span>
         )}
         {hasAnnotation && (
-          <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded">
+          <span className="px-2 py-1 bg-cream-200 text-sage-400 rounded">
             Annotation
           </span>
         )}
         {!hasFrame && !hasTranscript && !hasAnnotation && (
-          <span className="text-gray-500">No content</span>
+          <span className="text-sage-400">No content</span>
         )}
       </div>
 

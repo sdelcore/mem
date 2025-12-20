@@ -25,21 +25,45 @@ const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse,
 }) => {
   return (
-    <div className={`relative bg-forest-600 h-screen flex border-r border-cream-200 transition-all duration-300 ease-in-out ${
-      isCollapsed ? 'w-12' : 'w-64'
-    }`}>
-      {/* Collapse Toggle Button */}
-      <button
-        onClick={onToggleCollapse}
-        className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 bg-forest-500 hover:bg-forest-400 text-cream-100 p-1.5 rounded-full shadow-flat transition-colors duration-150 z-50"
-        aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      >
-        {isCollapsed ? (
-          <ChevronLeft className="w-4 h-4" />
-        ) : (
-          <ChevronRight className="w-4 h-4" />
-        )}
-      </button>
+    <>
+      {/* Mobile backdrop */}
+      {!isCollapsed && (
+        <div
+          className="fixed inset-0 bg-black/50 md:hidden z-40"
+          onClick={onToggleCollapse}
+          aria-hidden="true"
+        />
+      )}
+
+      <div className={`
+        ${/* Mobile: full-screen overlay when open, hidden when collapsed */''}
+        fixed inset-y-0 right-0 z-50 md:relative md:z-auto
+        ${isCollapsed
+          ? 'w-0 md:w-12 invisible md:visible'
+          : 'w-full sm:w-80 md:w-64 visible'
+        }
+        bg-forest-600 h-screen flex border-l md:border-r border-cream-200 transition-all duration-300 ease-in-out
+      `}>
+        {/* Collapse Toggle Button */}
+        <button
+          onClick={onToggleCollapse}
+          className={`
+            absolute top-4 -left-12 md:left-0 md:top-1/2
+            md:-translate-y-1/2 md:-translate-x-1/2
+            min-h-11 min-w-11 p-2.5
+            bg-forest-500 hover:bg-forest-400 text-cream-100
+            rounded-full shadow-flat transition-colors duration-150 z-50
+            flex items-center justify-center
+            ${isCollapsed ? 'hidden md:flex' : 'flex'}
+          `}
+          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {isCollapsed ? (
+            <ChevronLeft className="w-5 h-5" />
+          ) : (
+            <ChevronRight className="w-5 h-5" />
+          )}
+        </button>
 
       {/* Sidebar Content */}
       <div className={`flex flex-col w-full transition-opacity duration-300 ${
@@ -72,15 +96,16 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* Collapsed State - Show vertical text */}
-      {isCollapsed && (
-        <div className="flex items-center justify-center h-full w-full">
-          <p className="text-cream-200 text-xs font-medium transform -rotate-90 whitespace-nowrap">
-            Timeline
-          </p>
-        </div>
-      )}
-    </div>
+        {/* Collapsed State - Show vertical text */}
+        {isCollapsed && (
+          <div className="hidden md:flex items-center justify-center h-full w-full">
+            <p className="text-cream-200 text-xs font-medium transform -rotate-90 whitespace-nowrap">
+              Timeline
+            </p>
+          </div>
+        )}
+      </div>
+    </>
   )
 }
 

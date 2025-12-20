@@ -16,13 +16,13 @@ vi.mock('react-datepicker', () => ({
 
 describe('DateSelector', () => {
   const defaultProps = {
-    selectedDate: new Date('2024-01-15'),
+    selectedDate: new Date('2024-01-15T12:00:00'),  // Use noon to avoid timezone issues
     onDateChange: vi.fn(),
   }
 
   it('renders date display', () => {
     render(<DateSelector {...defaultProps} />)
-    
+
     expect(screen.getByText('Monday')).toBeInTheDocument()
     expect(screen.getByText('Jan 15, 2024')).toBeInTheDocument()
   })
@@ -111,9 +111,17 @@ describe('DateSelector', () => {
     )
   })
 
-  it('renders date picker component', () => {
+  it('shows date picker when calendar button is clicked', () => {
     render(<DateSelector {...defaultProps} />)
-    
+
+    // Calendar is hidden by default
+    expect(screen.queryByTestId('date-picker')).not.toBeInTheDocument()
+
+    // Click the toggle calendar button
+    const toggleButton = screen.getByLabelText('Toggle calendar')
+    fireEvent.click(toggleButton)
+
+    // Now the date picker should be visible
     expect(screen.getByTestId('date-picker')).toBeInTheDocument()
   })
 })

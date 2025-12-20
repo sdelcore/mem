@@ -49,18 +49,19 @@ describe('debounce', () => {
   })
 
   it('preserves this context', () => {
+    const originalMethod = vi.fn(function(this: any) {
+      return this.value
+    })
+
     const obj = {
       value: 'test',
-      method: vi.fn(function(this: any) {
-        return this.value
-      })
+      method: debounce(originalMethod, 100)
     }
 
-    obj.method = debounce(obj.method, 100)
     obj.method()
 
     vi.advanceTimersByTime(100)
-    expect(obj.method).toHaveBeenCalled()
+    expect(originalMethod).toHaveBeenCalled()
   })
 
   it('allows multiple independent debounced functions', () => {

@@ -11,9 +11,10 @@ describe('Timeline', () => {
 
   it('renders timeline with time labels', () => {
     render(<Timeline {...defaultProps} />)
-    
-    expect(screen.getByText('10:00:00')).toBeInTheDocument()
-    expect(screen.getByText('11:00:00')).toBeInTheDocument()
+
+    // Time format is 'MMM dd, HH:mm:ss' for start and 'HH:mm:ss' for end
+    expect(screen.getByText(/Jan 15, 10:00:00/)).toBeInTheDocument()
+    expect(screen.getByText(/11:00:00/)).toBeInTheDocument()
   })
 
   it('renders legend with all data types', () => {
@@ -28,12 +29,11 @@ describe('Timeline', () => {
 
   it('calls onTimeSelect when segment is clicked', () => {
     const onTimeSelect = vi.fn()
-    render(<Timeline {...defaultProps} onTimeSelect={onTimeSelect} />)
-    
-    const segments = screen.getAllByRole('generic').filter(el => 
-      el.className.includes('flex-1')
-    )
-    
+    const { container } = render(<Timeline {...defaultProps} onTimeSelect={onTimeSelect} />)
+
+    // Find timeline segments by their class
+    const segments = container.querySelectorAll('.flex-1.border-r')
+
     if (segments[0]) {
       fireEvent.click(segments[0])
       expect(onTimeSelect).toHaveBeenCalled()
@@ -42,17 +42,16 @@ describe('Timeline', () => {
 
   it('handles drag selection for range', () => {
     const onRangeSelect = vi.fn()
-    render(<Timeline {...defaultProps} onRangeSelect={onRangeSelect} />)
-    
-    const segments = screen.getAllByRole('generic').filter(el => 
-      el.className.includes('flex-1')
-    )
-    
+    const { container } = render(<Timeline {...defaultProps} onRangeSelect={onRangeSelect} />)
+
+    // Find timeline segments by their class
+    const segments = container.querySelectorAll('.flex-1.border-r')
+
     if (segments[0] && segments[1]) {
       fireEvent.mouseDown(segments[0])
       fireEvent.mouseMove(segments[1])
       fireEvent.mouseUp(segments[1])
-      
+
       expect(onRangeSelect).toHaveBeenCalled()
     }
   })
@@ -78,12 +77,10 @@ describe('Timeline', () => {
       },
     ]
 
-    render(<Timeline {...defaultProps} data={dataWithContent} />)
-    
-    const segments = screen.getAllByRole('generic').filter(el => 
-      el.className.includes('flex-1')
-    )
-    
+    const { container } = render(<Timeline {...defaultProps} data={dataWithContent} />)
+
+    const segments = container.querySelectorAll('.flex-1.border-r')
+
     expect(segments.length).toBeGreaterThan(0)
   })
 
@@ -95,12 +92,10 @@ describe('Timeline', () => {
       },
     ]
 
-    render(<Timeline {...defaultProps} data={dataWithContent} />)
-    
-    const segments = screen.getAllByRole('generic').filter(el => 
-      el.className.includes('flex-1')
-    )
-    
+    const { container } = render(<Timeline {...defaultProps} data={dataWithContent} />)
+
+    const segments = container.querySelectorAll('.flex-1.border-r')
+
     if (segments[0]) {
       fireEvent.mouseMove(segments[0])
     }

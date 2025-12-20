@@ -1,4 +1,4 @@
-"""Audio transcription using Faster-Whisper."""
+"""Audio transcription using sttd with speaker diarization."""
 
 import logging
 import tempfile
@@ -7,126 +7,177 @@ from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
-from faster_whisper import WhisperModel
 
 from src.config import config
 
 logger = logging.getLogger(__name__)
 
+# Try to import sttd, fallback to stub if not available
+try:
+    from sttd import (
+        ProfileManager,
+        SpeakerIdentifier,
+        TranscriptionConfig,
+    )
+    from sttd import Transcriber as STTDTranscriber
+
+    STTD_AVAILABLE = True
+except ImportError:
+    logger.warning("sttd not available, using fallback mode without speaker identification")
+    STTD_AVAILABLE = False
+    STTDTranscriber = None
+    TranscriptionConfig = None
+    SpeakerIdentifier = None
+    ProfileManager = None
+
 
 class Transcriber:
-    """Handles audio transcription using Faster-Whisper."""
+    """Handles audio transcription using sttd with speaker identification."""
 
     def __init__(
-        self, model_name: str = None, device: str = None, compute_type: str = None
+        self,
+        model_name: str = None,
+        device: str = None,
+        compute_type: str = None,
+        profiles_path: str = None,
     ):
         """
-        Initialize transcriber with Faster-Whisper.
+        Initialize transcriber with sttd.
 
         Args:
             model_name: Whisper model size (uses config default if None)
             device: Device to use - "cuda" or "cpu" (uses config default if None)
-            compute_type: Compute type - "float16", "int8", "int8_float16" (uses config default if None)
+            compute_type: Compute type - "float16", "int8" (uses config default if None)
+            profiles_path: Path to voice profiles directory
         """
-        self.model_name = model_name or config.whisper.model
-        self.device = device or config.whisper.device
-        # Faster-whisper specific: compute type for quantization
-        self.compute_type = compute_type or getattr(
-            config.whisper, "compute_type", "float16"
-        )
-        self.model = None
+        self.model_name = model_name or config.sttd.model
+        self.device = device or config.sttd.device
+        self.compute_type = compute_type or config.sttd.compute_type
+        self.profiles_path = profiles_path or config.sttd.profiles_path
+
+        self.transcriber = None
+        self.identifier = None
+        self.profile_manager = None
 
     def load_model(self):
-        """Load the Faster-Whisper model."""
-        if self.model is None:
-            logger.info(f"Loading Faster-Whisper model: {self.model_name}")
+        """Load the sttd transcriber and speaker identifier."""
+        if self.transcriber is not None:
+            return
 
-            # Faster-whisper uses different initialization
-            # Models are downloaded to ~/.cache/huggingface by default
-            self.model = WhisperModel(
-                self.model_name,
-                device=self.device,
-                compute_type=self.compute_type,
-                cpu_threads=4,  # Number of threads when running on CPU
-                num_workers=1,  # Number of workers for preprocessing
-            )
-            logger.info(f"Faster-Whisper model loaded successfully on {self.device}")
+        if not STTD_AVAILABLE:
+            logger.warning("sttd not available, transcription will fail")
+            return
+
+        logger.info(f"Loading sttd model: {self.model_name}")
+
+        sttd_config = TranscriptionConfig(
+            model=self.model_name,
+            device=self.device,
+        )
+        self.transcriber = STTDTranscriber(sttd_config)
+
+        # Initialize speaker identification if enabled
+        if config.sttd.speaker_identification:
+            try:
+                self.identifier = SpeakerIdentifier()
+                profiles_dir = Path(self.profiles_path)
+                profiles_dir.mkdir(parents=True, exist_ok=True)
+                self.profile_manager = ProfileManager(profiles_dir)
+                logger.info(f"Speaker identification enabled, profiles at {profiles_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize speaker identification: {e}")
+                self.identifier = None
+                self.profile_manager = None
+
+        logger.info(f"sttd model loaded on {self.device}")
 
     def transcribe_audio(
-        self, audio_path: Path, language: Optional[str] = None
+        self,
+        audio_path: Path,
+        language: Optional[str] = None,
+        identify_speakers: bool = True,
     ) -> dict[str, Any]:
         """
-        Transcribe audio file with non-speech detection.
+        Transcribe audio file with optional speaker identification.
 
         Args:
             audio_path: Path to audio file
             language: Optional language code (e.g., 'en', 'es')
+            identify_speakers: Whether to identify speakers
 
         Returns:
             Dictionary with transcription results
         """
         self.load_model()
 
+        if not STTD_AVAILABLE or self.transcriber is None:
+            error_msg = "sttd transcriber not available - ensure sttd is installed correctly"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
+
         logger.info(f"Transcribing audio: {audio_path}")
 
-        # Force English language for transcription
+        # Force English language for transcription (matching original behavior)
         language = "en"
         logger.info("Forcing English language for transcription")
 
-        # Transcribe with Faster-Whisper
-        # Returns generator of segments and info dict
-        segments_generator, info = self.model.transcribe(
-            str(audio_path),
-            language=language,
-            beam_size=5,
-            best_of=5,
-            patience=1,
-            length_penalty=1,
-            temperature=0,
-            compression_ratio_threshold=2.4,
-            log_prob_threshold=config.whisper.logprob_threshold,
-            no_speech_threshold=config.whisper.no_speech_threshold,
-            condition_on_previous_text=True,
-            initial_prompt=None,
-            prefix=None,
-            suppress_blank=True,
-            suppress_tokens=[-1],
-            without_timestamps=False,
-            max_initial_timestamp=1.0,
-            word_timestamps=False,
-            prepend_punctuations='"\'"¿([{-',
-            append_punctuations='"\'.。,，!！?？:：")]}、',
-            vad_filter=True,  # Voice Activity Detection filter
-            vad_parameters=dict(
-                threshold=0.5,
-                min_speech_duration_ms=250,
-                max_speech_duration_s=float("inf"),
-                min_silence_duration_ms=2000,
-                window_size_samples=1024,
-                speech_pad_ms=400,
-            ),
-        )
+        # Get segments with timestamps using sttd
+        segments = self.transcriber.transcribe_file_with_segments(str(audio_path))
 
-        # Convert generator to list and extract text
+        # Identify speakers if enabled and profiles exist
+        if (
+            identify_speakers
+            and self.identifier
+            and self.profile_manager
+            and config.sttd.speaker_identification
+        ):
+            try:
+                profiles = self.profile_manager.load_all()
+                if profiles:
+                    segments = self.identifier.identify_segments(
+                        str(audio_path), segments, profiles
+                    )
+                    logger.info(f"Identified speakers using {len(profiles)} profiles")
+            except Exception as e:
+                logger.warning(f"Speaker identification failed: {e}")
+
+        # Convert to our format
         segments_list = []
         full_text = []
 
-        for segment in segments_generator:
+        for segment in segments:
+            # Handle both tuple format (start, end, text) and object format
+            if isinstance(segment, tuple):
+                start, end, text = segment
+                speaker = None
+                speaker_confidence = None
+            else:
+                start = getattr(segment, "start", 0)
+                end = getattr(segment, "end", 0)
+                text = getattr(segment, "text", "").strip()
+                speaker = getattr(segment, "speaker", None)
+                speaker_confidence = getattr(segment, "speaker_confidence", None)
+
             segment_dict = {
-                "start": segment.start,
-                "end": segment.end,
-                "text": segment.text.strip(),
-                "no_speech_prob": segment.no_speech_prob,
-                "avg_logprob": segment.avg_logprob,
-                "compression_ratio": segment.compression_ratio,
+                "start": start,
+                "end": end,
+                "text": text.strip() if isinstance(text, str) else text,
+                "speaker": speaker,
+                "speaker_confidence": speaker_confidence,
             }
             segments_list.append(segment_dict)
-            full_text.append(segment.text.strip())
+
+            # Build text with speaker labels if available
+            text_content = segment_dict["text"]
+            if segment_dict["speaker"]:
+                full_text.append(f"[{segment_dict['speaker']}]: {text_content}")
+            else:
+                full_text.append(text_content)
 
         combined_text = " ".join(full_text).strip()
 
-        # Check if it's non-speech audio
-        if config.whisper.detect_non_speech:
+        # Check if it's non-speech audio (always check for voice notes)
+        if True:  # Always check for non-speech detection
             is_non_speech, audio_type = self.detect_non_speech_audio(
                 {"text": combined_text, "segments": segments_list}
             )
@@ -135,22 +186,25 @@ class Transcriber:
                 logger.info(f"Non-speech audio detected ({audio_type}): {audio_path}")
                 return {
                     "text": audio_type,
-                    "language": info.language if info else language,
+                    "language": language,
                     "segments": [{"text": audio_type, "start": 0, "end": 0}],
                     "is_non_speech": True,
                     "audio_type": audio_type,
-                    "original_text": combined_text,  # Keep for debugging
+                    "original_text": combined_text,
                 }
 
         return {
             "text": combined_text,
-            "language": info.language if info else language,
+            "language": language,
             "segments": segments_list,
             "is_non_speech": False,
         }
 
     def transcribe_chunk(
-        self, audio_data: bytes, sample_rate: int = None, language: Optional[str] = None
+        self,
+        audio_data: bytes,
+        sample_rate: int = None,
+        language: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Transcribe audio chunk from bytes with non-speech detection.
@@ -180,7 +234,7 @@ class Transcriber:
                 wav.writeframes(audio_data)
 
         try:
-            # Transcribe with non-speech detection
+            # Transcribe with speaker identification
             result = self.transcribe_audio(tmp_path, language)
             return result
         finally:
@@ -200,50 +254,8 @@ class Transcriber:
         Returns:
             Dictionary with transcription and timing information
         """
-        self.load_model()
-
-        logger.info(f"Transcribing with timestamps: {audio_path}")
-
-        # Transcribe with word timestamps enabled
-        segments_generator, info = self.model.transcribe(
-            str(audio_path),
-            language=language,
-            word_timestamps=True,  # Enable word-level timestamps
-            vad_filter=True,
-        )
-
-        # Extract segments with timing
-        segments = []
-        full_text = []
-
-        for segment in segments_generator:
-            words = []
-            if segment.words:
-                words = [
-                    {
-                        "start": word.start,
-                        "end": word.end,
-                        "word": word.word,
-                        "probability": word.probability,
-                    }
-                    for word in segment.words
-                ]
-
-            segments.append(
-                {
-                    "start": segment.start,
-                    "end": segment.end,
-                    "text": segment.text.strip(),
-                    "words": words,
-                }
-            )
-            full_text.append(segment.text.strip())
-
-        return {
-            "text": " ".join(full_text).strip(),
-            "language": info.language if info else language,
-            "segments": segments,
-        }
+        # sttd provides segment-level timestamps by default
+        return self.transcribe_audio(audio_path, language)
 
     def detect_language(self, audio_path: Path) -> str:
         """
@@ -255,29 +267,9 @@ class Transcriber:
         Returns:
             Detected language code
         """
-        self.load_model()
-
-        # Faster-whisper language detection
-        # Transcribe a short segment to detect language
-        segments, info = self.model.transcribe(
-            str(audio_path),
-            beam_size=1,
-            best_of=1,
-            temperature=0,
-            without_timestamps=True,
-            max_initial_timestamp=10.0,  # Only analyze first 10 seconds
-            condition_on_previous_text=False,
-        )
-
-        # Get detected language from info
-        detected_language = info.language if info else "unknown"
-        language_probability = info.language_probability if info else 0.0
-
-        logger.info(
-            f"Detected language: {detected_language} (confidence: {language_probability:.2f})"
-        )
-
-        return detected_language
+        # For now, return English as default
+        # sttd can be extended to support language detection
+        return "en"
 
     def calculate_confidence(self, segments: list) -> float:
         """
@@ -301,6 +293,9 @@ class Transcriber:
                 # Convert log probability to probability
                 prob = np.exp(segment["avg_logprob"])
                 total_prob += prob
+                total_segments += 1
+            elif "speaker_confidence" in segment and segment["speaker_confidence"]:
+                total_prob += segment["speaker_confidence"]
                 total_segments += 1
 
         if total_segments > 0:
@@ -465,3 +460,8 @@ class Transcriber:
                 return "[Music]"
 
         return ""
+
+    def get_profile_manager(self) -> Optional["ProfileManager"]:
+        """Get the profile manager for external use."""
+        self.load_model()
+        return self.profile_manager

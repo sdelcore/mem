@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+
+# Build outputs (created in container)
+dist/
+build/
+
+# Development
+.vite/
+.direnv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Nix files
+flake.nix
+flake.lock
+result
+
+# Test files
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+__tests__/
+coverage/
+
+# Environment files (use build args instead)
+.env
+.env.local
+.env.development
+.envrc
+
+# Git
+.git/
+.gitignore

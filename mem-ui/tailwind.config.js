@@ -36,7 +36,25 @@ export default {
           purple: '#8b5cf6',
           green: '#739072',
           orange: '#f97316',
-        }
+        },
+        // Amber for warning states (replaces generic yellow)
+        amber: {
+          50: '#fffbeb',
+          100: '#fef3c7',
+          200: '#fde68a',
+          300: '#fcd34d',
+          400: '#fbbf24',
+          500: '#f59e0b',
+          600: '#ca8a04',
+        },
+        // Semantic status colors
+        status: {
+          live: '#ef4444',      // Red for universal recognition
+          waiting: '#ca8a04',   // amber-600
+          ended: '#9fac9c',     // sage-200
+          error: '#dc2626',     // red-600
+          success: '#537050',   // sage-500
+        },
       },
       animation: {
         'fade-in': 'fadeIn 0.5s ease-in-out',

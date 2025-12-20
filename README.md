@@ -1,32 +1,19 @@
-# Mem - Temporal Video Intelligence System
+# Mem
 
-**Capture everything. Store efficiently. Process intelligently.**
+Video processing system that captures frames and transcriptions from video files and live streams, storing them with absolute UTC timestamps in DuckDB. Achieves ~95% storage reduction through perceptual hash deduplication.
 
-Mem is a production-ready video processing system that captures frames and transcriptions from video files and live streams, storing them with absolute UTC timestamps. Built for continuous recording scenarios (security cameras, screen recording, life logging), Mem achieves **95% storage reduction** through intelligent frame deduplication while maintaining instant temporal access to any moment.
+## Features
 
-## 🎯 Why Mem?
+- **Frame Deduplication** - Perceptual hashing reduces storage from ~2.4GB to ~120MB per day
+- **Speaker Diarization** - Automatic speaker labeling with voice profile matching
+- **Live Streaming** - RTMP server for OBS Studio and IP cameras
+- **GPU Transcription** - CUDA-accelerated Whisper (runs locally, no cloud)
+- **Temporal Queries** - All data anchored to UTC timestamps
+- **Self-Contained** - Frames stored as BLOBs in DuckDB
 
-Traditional video storage is expensive and inefficient. A 24/7 security camera generates ~2.4GB per day, but 95% of frames are redundant. Mem solves this by:
+## Quick Start
 
-- **Deduplicating identical frames** using perceptual hashing (120MB vs 2.4GB per day)
-- **Anchoring everything to UTC time** for precise temporal queries
-- **Separating capture from analysis** - store once, process many times
-- **Supporting both files and live streams** from OBS Studio or IP cameras
-- **GPU-accelerated transcription** with local Whisper models (no cloud dependencies)
-
-## ✨ Key Features
-
-- 📊 **95% Storage Reduction** - Perceptual hash deduplication for static scenes
-- ⏰ **Temporal Architecture** - All data anchored to absolute UTC timestamps
-- 🔴 **Live Streaming** - RTMP server for OBS Studio and IP cameras
-- 🎯 **GPU Acceleration** - CUDA-enabled Whisper transcription
-- 🗄️ **Self-Contained** - Frames stored as BLOBs in DuckDB, no filesystem dependencies
-- 🔒 **Privacy-First** - All processing happens locally, no cloud APIs
-- 🚀 **Production-Ready** - Docker deployment with health checks and monitoring
-
-## 🚀 Quick Start
-
-### Option 1: Local Development
+### Local Development
 
 ```bash
 # Clone repository
@@ -42,7 +29,7 @@ cd mem
 # API Docs: http://localhost:8000/docs
 ```
 
-### Option 2: Docker Deployment
+### Docker Deployment
 
 ```bash
 # Start all services with Docker Compose
@@ -54,7 +41,7 @@ docker-compose up -d
 # RTMP Stream: rtmp://localhost:1935/live
 ```
 
-### Option 3: Manual Setup
+### Manual Setup
 
 ```bash
 # Backend
@@ -70,7 +57,7 @@ npm run dev
 # Access at http://localhost:5173
 ```
 
-## 📹 Processing Videos
+## Processing Videos
 
 ### Important: Filename Format
 Videos **MUST** be named `YYYY-MM-DD_HH-MM-SS.mp4` (UTC timestamp when recording started)
@@ -87,7 +74,7 @@ curl -X POST http://localhost:8000/api/capture \
 # 3. Select your video file
 ```
 
-## 🔴 Live Streaming with OBS
+## Live Streaming with OBS
 
 ### 1. Create Stream Session (Web UI)
 - Open http://localhost:3000
@@ -106,7 +93,7 @@ curl -X POST http://localhost:8000/api/capture \
 - Start streaming in OBS
 - Watch real-time stats and deduplication
 
-## 📊 Architecture Overview
+## Architecture
 
 ```
 ┌──────────────────────────────────────────────────────┐
@@ -149,10 +136,10 @@ curl -X POST http://localhost:8000/api/capture \
 └──────────────────────────────────────────────────────┘
 ```
 
-## 🛠️ Development
+## Development
 
 ### Prerequisites
-- Python 3.9 (exact version required)
+- Python 3.10-3.12 (3.13+ not yet supported due to dependencies)
 - Node.js 18+ and npm
 - FFmpeg for audio/video processing
 - CUDA toolkit (optional, for GPU acceleration)
@@ -188,7 +175,7 @@ nix develop
 nix develop -c uv run uvicorn src.api.app:app --reload
 ```
 
-## 📈 Performance Metrics
+## Performance
 
 | Metric | Value | Notes |
 |--------|-------|-------|
@@ -199,7 +186,7 @@ nix develop -c uv run uvicorn src.api.app:app --reload
 | Stream Latency | <1 second | RTMP to database |
 | Max Concurrent Streams | 10 | Configurable |
 
-## 🔧 Configuration
+## Configuration
 
 ### Backend (`mem/config.yaml`)
 ```yaml
@@ -218,7 +205,7 @@ streaming:
     max_concurrent_streams: 10
 ```
 
-## 🐳 Docker Deployment
+## Docker Production Deployment
 
 ### Production Deployment with GPU
 
@@ -238,7 +225,7 @@ docker-compose -f docker-compose.yml up -d
 - nvidia-docker runtime installed
 - 4GB+ VRAM for optimal performance
 
-## 📚 API Documentation
+## API
 
 Interactive API documentation available at http://localhost:8000/docs
 
@@ -261,7 +248,7 @@ GET /api/streams
 POST /api/streams/{stream_key}/start
 ```
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run all tests
@@ -274,7 +261,7 @@ uv run pytest tests/ --cov=src --cov-report=html
 cd mem-ui && npm run test
 ```
 
-## 📦 Project Structure
+## Project Structure
 
 ```
 mem/
@@ -295,45 +282,13 @@ mem/
 └── docker-compose.yml      # Container orchestration
 ```
 
-## 🚧 Current Limitations
+## Limitations
 
 - Videos must follow `YYYY-MM-DD_HH-MM-SS.mp4` naming convention
 - No built-in authentication (use reverse proxy)
 - Synchronous video processing (async coming soon)
 - Maximum 10 concurrent streams (configurable)
 
-## 🗺️ Roadmap
+## License
 
-- [ ] Authentication and multi-user support
-- [ ] Async video processing with job queue
-- [ ] Cloud storage backends (S3, GCS)
-- [ ] AI-powered scene analysis
-- [ ] Mobile app for viewing
-- [ ] Export to standard formats
-- [ ] Kubernetes deployment
-
-## 🤝 Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Ensure tests pass (`make test`)
-5. Format code (`make format`)
-6. Submit a pull request
-
-## 📄 License
-
-MIT License - See [LICENSE](LICENSE) file for details
-
-## 🙏 Acknowledgments
-
-- [OpenAI Whisper](https://github.com/openai/whisper) for transcription
-- [DuckDB](https://duckdb.org/) for time-series storage
-- [FastAPI](https://fastapi.tiangolo.com/) for the backend framework
-- [React](https://reactjs.org/) for the frontend framework
-
----
-
-**Built with ❤️ for continuous recording and temporal intelligence**
+MIT

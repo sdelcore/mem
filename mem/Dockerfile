@@ -1,32 +1,35 @@
 # Multi-stage Dockerfile for Mem backend with Faster-Whisper GPU support
 # Optimized for GTX 1080 Ti with CUDA support
+# Uses CUDA 12.6 with cuDNN 9 for compatibility with ctranslate2 4.x / faster-whisper 1.x
 
 # Stage 1: Builder
-FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04 AS builder
+FROM nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04 AS builder
 
 # Prevent interactive prompts during build
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 
-# Install system dependencies and Python 3.9
+# Install system dependencies and Python 3.10 (Ubuntu 22.04 default)
 RUN apt-get update && apt-get install -y \
-    python3.9 \
-    python3.9-dev \
+    python3 \
+    python3-dev \
     python3-pip \
+    python3-venv \
     ffmpeg \
     git \
     curl \
     wget \
-    && rm -rf /var/lib/apt/lists/*
+    pkg-config \
+    libcairo2-dev \
+    libgirepository1.0-dev \
+    gir1.2-glib-2.0 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3 /usr/bin/python
 
 # Install uv for fast Python package management
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:$PATH"
-
-# Set Python 3.9 as default
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.9 1
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1
+ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /app
 
@@ -41,10 +44,10 @@ RUN uv venv && \
 
 # Pre-download Faster-Whisper model during build to avoid runtime downloads
 # This caches the model in the image
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8')"
+RUN .venv/bin/python -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8')"
 
 # Stage 2: Runtime
-FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
 
 # Environment setup
 ENV DEBIAN_FRONTEND=noninteractive
@@ -53,17 +56,18 @@ ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ENV CUDA_VISIBLE_DEVICES=0
 
-# Install runtime dependencies only
+# Install runtime dependencies (including PyGObject/sttd requirements)
 RUN apt-get update && apt-get install -y \
-    python3.9 \
+    python3 \
     python3-pip \
     ffmpeg \
     libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set Python 3.9 as default
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.9 1
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1
+    libcairo2 \
+    libgirepository-1.0-1 \
+    gir1.2-glib-2.0 \
+    libportaudio2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3 /usr/bin/python
 
 # Create non-root user for security
 RUN useradd -m -u 1000 memuser && \

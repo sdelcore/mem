@@ -128,7 +128,7 @@ make format && make lint   # Format and lint before commit
 ## Development Standards
 
 ### Python Version
-- **Required**: Python 3.9 (specified in pyproject.toml as `>=3.9,<3.10`)
+- **Required**: Python 3.10-3.12 (specified in pyproject.toml as `>=3.10,<3.13`)
 
 ### Code Quality
 - Type hints required for all functions

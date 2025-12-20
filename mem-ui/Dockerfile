@@ -8,8 +8,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production && \
+# Install all dependencies (including dev deps needed for build)
+RUN npm ci && \
     npm cache clean --force
 
 # Copy source code
@@ -24,7 +24,17 @@ FROM nginx:alpine
 # Install runtime dependencies
 RUN apk add --no-cache \
     curl \
-    tini
+    tini \
+    openssl
+
+# Generate self-signed SSL certificate for local network access
+RUN mkdir -p /etc/nginx/ssl && \
+    openssl req -x509 -nodes -days 365 \
+      -subj "/CN=mem-local" \
+      -newkey rsa:2048 \
+      -keyout /etc/nginx/ssl/server.key \
+      -out /etc/nginx/ssl/server.crt && \
+    chmod 600 /etc/nginx/ssl/server.key
 
 # Remove default nginx config
 RUN rm -rf /etc/nginx/conf.d/*
@@ -39,6 +49,7 @@ COPY --from=builder --chown=nginx:nginx /app/dist /usr/share/nginx/html
 RUN chown -R nginx:nginx /var/cache/nginx && \
     chown -R nginx:nginx /var/log/nginx && \
     chown -R nginx:nginx /etc/nginx/conf.d && \
+    chown -R nginx:nginx /etc/nginx/ssl && \
     touch /var/run/nginx.pid && \
     chown -R nginx:nginx /var/run/nginx.pid
 
@@ -49,8 +60,8 @@ USER nginx
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost/ || exit 1
 
-# Expose port
-EXPOSE 80
+# Expose ports (HTTP and HTTPS)
+EXPOSE 80 443
 
 # Use tini for proper signal handling
 ENTRYPOINT ["/sbin/tini", "--"]
