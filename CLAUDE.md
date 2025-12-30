@@ -59,24 +59,27 @@ tail -f /tmp/mem-frontend.log                   # Frontend logs
 
 ### Docker Development
 ```bash
-# Build and run all services (backend, frontend, RTMP server)
-docker-compose up -d
+# GPU mode (requires NVIDIA GPU for STTD transcription)
+docker compose --profile gpu up -d
+
+# CPU mode (slower transcription, no GPU required)
+docker compose --profile cpu up -d
 
 # Build specific service
-docker-compose build mem-backend
-docker-compose build mem-frontend
-docker-compose build mem-rtmp
+docker compose build mem-backend
+docker compose build mem-frontend
+docker compose build mem-rtmp
 
 # View logs
-docker-compose logs -f mem-backend
-docker-compose logs -f mem-frontend
-docker-compose logs -f mem-rtmp
+docker compose logs -f mem-backend
+docker compose logs -f mem-frontend
+docker compose logs -f mem-sttd
 
 # Stop all services
-docker-compose down
+docker compose down
 
 # Clean up volumes
-docker-compose down -v
+docker compose down -v
 ```
 
 ### Nix Development Environment
@@ -102,7 +105,7 @@ nix develop -c uv run pytest tests/
 - **Strict Input Format**: Videos MUST be named `YYYY-MM-DD_HH-MM-SS.mp4` (UTC time)
 - **Database Storage**: Frames stored as JPEG BLOBs in DuckDB, no filesystem dependencies
 - **Stream Support**: RTMP streams from OBS Studio with auto-resolution detection
-- **GPU Acceleration**: CUDA-enabled Whisper for fast transcription (when available)
+- **Decoupled Transcription**: STTD service handles speech-to-text with speaker diarization (GPU or CPU)
 - **Capture First**: Raw data capture separated from analysis/processing
 
 ### Backend Structure (`mem/src/`)
@@ -111,12 +114,16 @@ api/
 ├── app.py           # FastAPI application setup
 ├── routes.py        # API endpoints
 ├── services.py      # Business logic layer
-└── models.py        # Request/response schemas
+├── models.py        # Request/response schemas
+├── settings.py      # Application settings
+├── exceptions.py    # Custom exception classes
+└── voice_profiles.py # Voice profile management
 
 capture/
 ├── pipeline.py      # Main processing orchestrator
 ├── extractor.py     # Frame extraction, timestamp parsing
-├── transcriber.py   # Whisper audio transcription
+├── transcriber.py   # Transcription via STTD client
+├── sttd_client.py   # HTTP client for STTD service
 ├── frame.py         # Perceptual hashing, deduplication
 └── stream_server.py # RTMP streaming support
 
@@ -241,42 +248,54 @@ npm run test:e2e
 ### Backend (`config.yaml`)
 ```yaml
 database:
-  path: "mem.duckdb"    # Can be absolute path or relative to working directory
+  path: /data/db/mem.duckdb
+
+sttd:
+  host: "mem-sttd"              # STTD server host (use 127.0.0.1 for local dev)
+  port: 8765                    # STTD server port
+  timeout: 300.0                # Request timeout in seconds
 
 capture:
-  frame_interval_seconds: 5     # Extract frame every N seconds
-  jpeg_quality: 85              # JPEG compression quality (1-100)
-  audio_chunk_duration: 300     # Audio chunks for transcription (seconds)
-
-whisper:
-  model: "base"                 # tiny, base, small, medium, large
-  device: "cuda"                # cuda (GPU) or cpu
-  compute_type: "float16"       # float16 for GPU, int8 for CPU
+  frame:
+    interval_seconds: 5         # Extract frame every N seconds
+    jpeg_quality: 85            # JPEG compression quality (1-100)
+    enable_deduplication: true
+    similarity_threshold: 100.0
+  audio:
+    chunk_duration_seconds: 300 # Audio chunks for transcription
+    sample_rate: 16000
 
 api:
   host: "0.0.0.0"
   port: 8000
+  max_upload_size: 5368709120   # 5GB
 
 streaming:
   rtmp:
     enabled: true
     port: 1935
     max_concurrent_streams: 10
-    frame_interval_fps: 1       # Extract 1 frame per second from streams
+  capture:
+    frame_interval_seconds: 1   # More frequent for live streams
 ```
 
 ### Docker Environment Variables
 ```bash
-# GPU Configuration (for Whisper acceleration)
+# GPU Configuration (for STTD service)
 NVIDIA_VISIBLE_DEVICES=0        # GPU device ID
 CUDA_VISIBLE_DEVICES=0          # CUDA device selection
 
 # Application
 MEM_CONFIG_PATH=/app/config/config.yaml  # Config file location
 PYTHONUNBUFFERED=1             # Ensure logs are shown in real-time
+LOG_LEVEL=INFO                 # Logging level
 
 # Backend API
 BACKEND_URL=http://mem-backend:8000  # For inter-service communication
+
+# Docker Compose
+COMPOSE_PROFILES=gpu           # or "cpu" for CPU-only mode
+TAG=latest                     # Image version tag
 ```
 
 ### Frontend
@@ -295,23 +314,26 @@ BACKEND_URL=http://mem-backend:8000  # For inter-service communication
 
 ## Dependencies
 
-### Python (requires 3.9)
+### Python (requires 3.10-3.12)
 Key packages:
 - `fastapi` & `uvicorn`: REST API framework
 - `duckdb`: High-performance columnar database
 - `opencv-python-headless`: Video frame extraction
-- `openai-whisper`: Audio transcription (GPU accelerated)
 - `imagehash`: Perceptual hashing for deduplication
 - `pydantic`: Data validation and serialization
-- `httpx`: Async HTTP client
+- `httpx`: HTTP client for STTD communication
 - `python-multipart`: File upload support
 - `ffmpeg-python`: FFmpeg wrapper for audio extraction
 
 ### System Dependencies (provided by Nix)
-- Python 3.9
+- Python 3.10+
 - FFmpeg (for audio/video processing)
-- CUDA toolkit (for GPU acceleration)
 - DuckDB CLI tools
+
+### External Services
+- **STTD**: Speech-to-text with diarization service (GPU or CPU mode)
+  - Runs as separate container
+  - Handles Whisper transcription and speaker identification
 
 ### Frontend
 - `react` & `react-dom`: UI framework

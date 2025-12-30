@@ -32,8 +32,11 @@ cd mem
 ### Docker Deployment
 
 ```bash
-# Start all services with Docker Compose
-docker-compose up -d
+# GPU mode (requires NVIDIA GPU for fast transcription)
+docker compose --profile gpu up -d
+
+# CPU mode (no GPU required, slower transcription)
+docker compose --profile cpu up -d
 
 # Services will be available at:
 # Frontend: http://localhost
@@ -111,8 +114,8 @@ curl -X POST http://localhost:8000/api/capture \
 │  │  (5 sec)    │    │ deduplication)           │   │
 │  └─────────────┘    └──────────────────────────┘   │
 │  ┌─────────────┐    ┌──────────────────────────┐   │
-│  │Audio Extract│───▶│ Whisper Transcription    │   │
-│  │             │    │ (GPU Accelerated)        │   │
+│  │Audio Extract│───▶│ STTD Service (external)  │   │
+│  │             │    │ Whisper + Diarization    │   │
 │  └─────────────┘    └──────────────────────────┘   │
 └────────────────────────┬─────────────────────────────┘
                          ▼
@@ -122,7 +125,7 @@ curl -X POST http://localhost:8000/api/capture \
 │  │ Tables:                                      │   │
 │  │ • unique_frames (BLOB storage)              │   │
 │  │ • timeline (temporal index)                 │   │
-│  │ • transcriptions (Whisper output)           │   │
+│  │ • transcriptions (with speaker labels)      │   │
 │  │ • sources (videos/streams metadata)         │   │
 │  └─────────────────────────────────────────────┘   │
 └────────────────────┬─────────────────────────────────┘
@@ -190,14 +193,15 @@ nix develop -c uv run uvicorn src.api.app:app --reload
 
 ### Backend (`mem/config.yaml`)
 ```yaml
-capture:
-  frame_interval_seconds: 5    # Extract frame every N seconds
-  jpeg_quality: 85             # JPEG compression (1-100)
+sttd:
+  host: "mem-sttd"             # STTD server host
+  port: 8765                   # STTD server port
+  timeout: 300.0               # Request timeout
 
-whisper:
-  model: "base"                # tiny/base/small/medium/large
-  device: "cuda"               # cuda or cpu
-  compute_type: "float16"      # float16 (GPU) or int8 (CPU)
+capture:
+  frame:
+    interval_seconds: 5        # Extract frame every N seconds
+    jpeg_quality: 85           # JPEG compression (1-100)
 
 streaming:
   rtmp:
@@ -207,20 +211,21 @@ streaming:
 
 ## Docker Production Deployment
 
-### Production Deployment with GPU
+### Production Deployment
 
 ```bash
-# Build and push images
-./deploy/build-and-push.sh
+# GPU mode (recommended for fast transcription)
+docker compose --profile gpu up -d
 
-# Deploy to server
-./deploy/deploy-to-wise18.sh
+# CPU mode (no GPU required)
+docker compose --profile cpu up -d
 
-# Or manually with docker-compose
-docker-compose -f docker-compose.yml up -d
+# Or set profile in .env file
+echo "COMPOSE_PROFILES=gpu" > .env
+docker compose up -d
 ```
 
-### GPU Requirements
+### GPU Requirements (for STTD service)
 - NVIDIA GPU with CUDA support
 - nvidia-docker runtime installed
 - 4GB+ VRAM for optimal performance
@@ -268,7 +273,7 @@ mem/
 ├── mem/                    # Backend (Python/FastAPI)
 │   ├── src/
 │   │   ├── api/           # REST API endpoints
-│   │   ├── capture/       # Frame/audio extraction
+│   │   ├── capture/       # Frame/audio extraction + STTD client
 │   │   └── storage/       # DuckDB operations
 │   └── tests/             # Unit tests
 ├── mem-ui/                 # Frontend (React/TypeScript)
@@ -278,8 +283,7 @@ mem/
 │   │   └── utils/         # API client
 │   └── tests/             # Frontend tests
 ├── rtmp/                   # RTMP streaming server
-├── deploy/                 # Deployment scripts
-└── docker-compose.yml      # Container orchestration
+└── docker-compose.yml      # Container orchestration (gpu/cpu profiles)
 ```
 
 ## Limitations
