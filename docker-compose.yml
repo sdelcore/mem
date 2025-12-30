@@ -1,27 +1,10 @@
 # Mem Docker Compose Configuration
-# Usage:
-#   GPU mode: docker compose --profile gpu up -d
-#   CPU mode: docker compose --profile cpu up -d
-# Or set COMPOSE_PROFILES in .env file
 
 services:
-  # ============================================================================
-  # STTD Server - GPU Version (Speech-to-Text with Diarization)
-  # ============================================================================
   sttd:
     image: registry.sdelcore.com/mem/sttd:${TAG:-latest}
-    build:
-      context: https://github.com/sdelcore/sttd.git
-      dockerfile: Dockerfile
     container_name: mem-sttd
     restart: unless-stopped
-    profiles: ["gpu"]
-    devices:
-      - nvidia.com/gpu=all
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-0}
-      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
-    command: sttd server --host 0.0.0.0 --port 8765
     ports:
       - "${STTD_PORT:-8765}:8765"
     networks:
@@ -40,39 +23,6 @@ services:
       retries: 3
       start_period: 120s
 
-  # ============================================================================
-  # STTD Server - CPU Version
-  # ============================================================================
-  sttd-cpu:
-    image: registry.sdelcore.com/mem/sttd-cpu:${TAG:-latest}
-    build:
-      context: https://github.com/sdelcore/sttd.git
-      dockerfile: Dockerfile.cpu
-    container_name: mem-sttd
-    restart: unless-stopped
-    profiles: ["cpu"]
-    command: sttd server --host 0.0.0.0 --port 8765
-    ports:
-      - "${STTD_PORT:-8765}:8765"
-    networks:
-      - mem-network
-    volumes:
-      - sttd-models:/root/.cache/huggingface
-    deploy:
-      resources:
-        limits:
-          memory: 4G
-          cpus: '4'
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
-
-  # ============================================================================
-  # Backend - GPU Version (requires NVIDIA GPU)
-  # ============================================================================
   mem-backend:
     image: registry.sdelcore.com/mem/backend:${TAG:-latest}
     build:
@@ -80,11 +30,11 @@ services:
       dockerfile: Dockerfile
     container_name: mem-backend
     restart: unless-stopped
-    profiles: ["gpu"]
     environment:
       - PYTHONUNBUFFERED=1
       - MEM_CONFIG_PATH=/app/config/config.yaml
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - RTMP_HOST=${RTMP_HOST:-localhost}
     volumes:
       - ./data/db:/data/db
       - ./data/uploads:/data/uploads
@@ -96,44 +46,7 @@ services:
     depends_on:
       sttd:
         condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          memory: 4G
-          cpus: '2'
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-
-  # ============================================================================
-  # Backend - CPU Version (no GPU required)
-  # ============================================================================
-  mem-backend-cpu:
-    image: registry.sdelcore.com/mem/backend-cpu:${TAG:-latest}
-    build:
-      context: ./mem
-      dockerfile: Dockerfile.cpu
-    container_name: mem-backend
-    restart: unless-stopped
-    profiles: ["cpu"]
-    environment:
-      - PYTHONUNBUFFERED=1
-      - MEM_CONFIG_PATH=/app/config/config.yaml
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    volumes:
-      - ./data/db:/data/db
-      - ./data/uploads:/data/uploads
-      - ./data/config:/app/config:ro
-    ports:
-      - "${BACKEND_PORT:-8000}:8000"
-    networks:
-      - mem-network
-    depends_on:
-      sttd-cpu:
-        condition: service_healthy
+        required: false
     deploy:
       resources:
         limits:
@@ -144,11 +57,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 30s
 
-  # ============================================================================
-  # Frontend (shared by both profiles)
-  # ============================================================================
   mem-frontend:
     image: registry.sdelcore.com/mem/frontend:${TAG:-latest}
     build:
@@ -156,17 +66,12 @@ services:
       dockerfile: Dockerfile
     container_name: mem-frontend
     restart: unless-stopped
-    profiles: ["gpu", "cpu"]
     ports:
       - "${FRONTEND_PORT:-80}:80"
-      - "${FRONTEND_HTTPS_PORT:-443}:443"
     networks:
       - mem-network
     depends_on:
       mem-backend:
-        condition: service_started
-        required: false
-      mem-backend-cpu:
         condition: service_started
         required: false
     deploy:
@@ -180,9 +85,6 @@ services:
       timeout: 3s
       retries: 3
 
-  # ============================================================================
-  # RTMP Streaming Server (shared by both profiles)
-  # ============================================================================
   mem-rtmp:
     image: registry.sdelcore.com/mem/rtmp:${TAG:-latest}
     build:
@@ -190,7 +92,6 @@ services:
       dockerfile: Dockerfile
     container_name: mem-rtmp
     restart: unless-stopped
-    profiles: ["gpu", "cpu"]
     ports:
       - "${RTMP_PORT:-1935}:1935"
       - "${RTMP_STATS_PORT:-8080}:8080"
@@ -198,9 +99,6 @@ services:
       - mem-network
     depends_on:
       mem-backend:
-        condition: service_started
-        required: false
-      mem-backend-cpu:
         condition: service_started
         required: false
     volumes:
@@ -221,9 +119,6 @@ services:
 networks:
   mem-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.28.0.0/16
 
 volumes:
   sttd-models:
