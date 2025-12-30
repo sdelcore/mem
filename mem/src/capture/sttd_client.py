@@ -82,11 +82,14 @@ class STTDClient:
         except httpx.RequestError as e:
             raise STTDError(f"Request error: {e}")
 
-    def transcribe_file(self, audio_path: Path) -> dict[str, Any]:
-        """Transcribe an audio file.
+    def transcribe_file(
+        self, audio_path: Path, identify_speakers: bool = True
+    ) -> dict[str, Any]:
+        """Transcribe an audio file with optional speaker identification.
 
         Args:
             audio_path: Path to the audio file.
+            identify_speakers: Whether to identify speakers in the transcription (default: True).
 
         Returns:
             Transcription result with segments and speaker info.
@@ -107,7 +110,7 @@ class STTDClient:
             with open(audio_path, "rb") as f:
                 audio_data = f.read()
 
-            return self.transcribe_bytes(audio_data, content_type)
+            return self.transcribe_bytes(audio_data, content_type, identify_speakers)
 
         except httpx.ConnectError as e:
             raise STTDConnectionError(f"Cannot connect to STTD server at {self.base_url}: {e}")
@@ -115,13 +118,17 @@ class STTDClient:
             raise STTDError(f"Request error: {e}")
 
     def transcribe_bytes(
-        self, audio_data: bytes, content_type: str = "audio/wav"
+        self,
+        audio_data: bytes,
+        content_type: str = "audio/wav",
+        identify_speakers: bool = True,
     ) -> dict[str, Any]:
         """Transcribe raw audio bytes.
 
         Args:
             audio_data: Raw audio bytes.
             content_type: MIME type of audio data (default: audio/wav).
+            identify_speakers: Whether to identify speakers in the transcription (default: True).
 
         Returns:
             Transcription result with text, segments, and speaker info.
@@ -131,8 +138,16 @@ class STTDClient:
             STTDTranscriptionError: If transcription fails.
         """
         try:
+            params = []
+            if not identify_speakers:
+                params.append("identify_speakers=false")
+
+            url = f"{self.base_url}/transcribe"
+            if params:
+                url += "?" + "&".join(params)
+
             response = self._client.post(
-                f"{self.base_url}/transcribe",
+                url,
                 content=audio_data,
                 headers={"Content-Type": content_type},
             )
@@ -147,6 +162,110 @@ class STTDClient:
             raise STTDConnectionError(f"Cannot connect to STTD server at {self.base_url}: {e}")
         except httpx.TimeoutException as e:
             raise STTDError(f"Request timed out after {self.timeout}s: {e}")
+        except httpx.RequestError as e:
+            raise STTDError(f"Request error: {e}")
+
+    def list_profiles(self) -> list[dict]:
+        """List all voice profiles from STTD server.
+
+        Returns:
+            List of profile dicts with name, created_at, audio_duration.
+
+        Raises:
+            STTDConnectionError: If unable to connect to server.
+            STTDError: If request fails.
+        """
+        try:
+            response = self._client.get(f"{self.base_url}/profiles")
+            response.raise_for_status()
+            return response.json().get("profiles", [])
+        except httpx.ConnectError as e:
+            raise STTDConnectionError(f"Cannot connect to STTD server at {self.base_url}: {e}")
+        except httpx.RequestError as e:
+            raise STTDError(f"Request error: {e}")
+
+    def get_profile(self, name: str) -> dict | None:
+        """Get a specific voice profile.
+
+        Args:
+            name: Name of the voice profile.
+
+        Returns:
+            Profile dict if found, None if not found.
+
+        Raises:
+            STTDConnectionError: If unable to connect to server.
+            STTDError: If request fails.
+        """
+        try:
+            response = self._client.get(f"{self.base_url}/profiles/{name}")
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.json()
+        except httpx.ConnectError as e:
+            raise STTDConnectionError(f"Cannot connect to STTD server at {self.base_url}: {e}")
+        except httpx.RequestError as e:
+            raise STTDError(f"Request error: {e}")
+
+    def create_profile(self, name: str, audio_path: Path) -> dict:
+        """Create a voice profile from audio file.
+
+        Args:
+            name: Name for the voice profile.
+            audio_path: Path to the audio file containing voice sample.
+
+        Returns:
+            Created profile dict.
+
+        Raises:
+            STTDConnectionError: If unable to connect to server.
+            STTDError: If request fails.
+            FileNotFoundError: If audio file doesn't exist.
+        """
+        audio_path = Path(audio_path)
+        if not audio_path.exists():
+            raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+        content_type = self._get_content_type(audio_path)
+
+        try:
+            with open(audio_path, "rb") as f:
+                audio_data = f.read()
+
+            response = self._client.post(
+                f"{self.base_url}/profiles/{name}",
+                content=audio_data,
+                headers={"Content-Type": content_type},
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.ConnectError as e:
+            raise STTDConnectionError(f"Cannot connect to STTD server at {self.base_url}: {e}")
+        except httpx.RequestError as e:
+            raise STTDError(f"Request error: {e}")
+
+    def delete_profile(self, name: str) -> bool:
+        """Delete a voice profile.
+
+        Args:
+            name: Name of the voice profile to delete.
+
+        Returns:
+            True if deleted, False if profile not found.
+
+        Raises:
+            STTDConnectionError: If unable to connect to server.
+            STTDError: If request fails.
+        """
+        try:
+            response = self._client.delete(f"{self.base_url}/profiles/{name}")
+            if response.status_code == 404:
+                return False
+            response.raise_for_status()
+            return True
+        except httpx.ConnectError as e:
+            raise STTDConnectionError(f"Cannot connect to STTD server at {self.base_url}: {e}")
         except httpx.RequestError as e:
             raise STTDError(f"Request error: {e}")
 

@@ -79,22 +79,32 @@ curl -X POST http://localhost:8000/api/capture \
 
 ## Live Streaming with OBS
 
+The streaming system uses nginx-rtmp for RTMP ingestion with automatic frame extraction and deduplication.
+
 ### 1. Create Stream Session (Web UI)
 - Open http://localhost:3000
 - Click "Streams" button in header
 - Click "Create New Stream"
-- Copy the stream key
+- Note the **Server URL** and **Stream Key** displayed
 
 ### 2. Configure OBS Studio
 - Settings → Stream
 - Service: **Custom**
-- Server: `rtmp://localhost:1935/live`
-- Stream Key: *(paste from UI)*
+- Server: *(copy Server URL from UI, e.g., `rtmp://localhost:1935/live`)*
+- Stream Key: *(copy Stream Key from UI)*
 
 ### 3. Start Streaming
-- Click Play button on stream card in UI
-- Start streaming in OBS
-- Watch real-time stats and deduplication
+- Click "Start Streaming" in OBS
+- The stream automatically goes live when OBS connects
+- Watch real-time stats and frame counts in the UI
+
+### Remote Deployment
+For deployments accessible from other machines, set the `RTMP_HOST` environment variable:
+```bash
+# In docker-compose or .env
+RTMP_HOST=your-server.example.com
+```
+This ensures the UI displays the correct RTMP URL for OBS configuration.
 
 ## Architecture
 
@@ -106,7 +116,15 @@ curl -X POST http://localhost:8000/api/capture \
 │  └─────┬──────┘        └───────────┬─────────────┘  │
 └────────┼───────────────────────────┼─────────────────┘
          │                           │
-         ▼                           ▼
+         │                           ▼
+         │              ┌─────────────────────────────┐
+         │              │     nginx-rtmp Container    │
+         │              │  • Validates stream keys    │
+         │              │  • Extracts frames (FFmpeg) │
+         │              │  • HLS/DASH output          │
+         │              └───────────┬─────────────────┘
+         │                          │ HTTP callbacks
+         ▼                          ▼
 ┌──────────────────────────────────────────────────────┐
 │               Capture Pipeline                        │
 │  ┌─────────────┐    ┌──────────────────────────┐   │
@@ -205,8 +223,16 @@ capture:
 
 streaming:
   rtmp:
+    host: localhost            # External hostname for RTMP URLs (override with RTMP_HOST env var)
     port: 1935
     max_concurrent_streams: 10
+```
+
+### Environment Variables
+```bash
+RTMP_HOST=localhost            # External hostname shown in RTMP URLs (for remote access)
+MEM_CONFIG_PATH=/app/config/config.yaml  # Config file location
+LOG_LEVEL=INFO                 # Logging level
 ```
 
 ## Docker Production Deployment
@@ -248,9 +274,10 @@ GET /api/search?type=timeline&start=2025-01-01&end=2025-01-02
 GET /api/status
 
 # Stream management
-POST /api/streams/create
-GET /api/streams
-POST /api/streams/{stream_key}/start
+POST /api/streams/create        # Create stream session, returns RTMP URL + stream key
+GET /api/streams                # List all streams
+POST /api/streams/{stream_key}/stop   # Stop active stream
+DELETE /api/streams/{stream_key}      # Delete stream session
 ```
 
 ## Testing
@@ -282,7 +309,9 @@ mem/
 │   │   ├── hooks/         # Custom hooks
 │   │   └── utils/         # API client
 │   └── tests/             # Frontend tests
-├── rtmp/                   # RTMP streaming server
+├── rtmp/                   # nginx-rtmp streaming server
+│   ├── nginx.conf          # RTMP server config with HTTP callbacks
+│   └── stream_handler.py   # Frame extraction script (called by nginx)
 └── docker-compose.yml      # Container orchestration (gpu/cpu profiles)
 ```
 

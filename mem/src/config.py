@@ -21,7 +21,8 @@ class CaptureFrameConfig(BaseModel):
 class CaptureAudioConfig(BaseModel):
     """Audio capture configuration."""
 
-    chunk_duration_seconds: int = 300
+    chunk_duration_seconds: int = 60  # Changed from 300 to 60 for better accuracy
+    overlap_seconds: int = 5  # Overlap between chunks to prevent word cutoffs
     sample_rate: int = 16000
 
 
@@ -38,6 +39,8 @@ class STTDConfig(BaseModel):
     host: str = "127.0.0.1"  # STTD server host (can be remote IP)
     port: int = 8765  # STTD server port
     timeout: float = 300.0  # Request timeout in seconds (transcription can be slow)
+    identify_speakers: bool = True  # Enable speaker identification
+    profiles_path: str | None = None  # Custom profiles path (uses STTD default if None)
 
     @property
     def base_url(self) -> str:
@@ -81,6 +84,7 @@ class StreamingRTMPConfig(BaseModel):
     """RTMP streaming configuration."""
 
     enabled: bool = True
+    host: str = "localhost"  # External hostname for RTMP URLs shown to users
     port: int = 1935
     max_concurrent_streams: int = 10
 
@@ -167,7 +171,7 @@ def load_config(path: Path | None = None) -> Config:
 
         # Parse nested config structure
         streaming_data = data.get("streaming", {})
-        return Config(
+        config_obj = Config(
             database=DatabaseConfig(**data.get("database", {})),
             capture=CaptureConfig(
                 frame=CaptureFrameConfig(**data.get("capture", {}).get("frame", {})),
@@ -186,7 +190,14 @@ def load_config(path: Path | None = None) -> Config:
         )
     else:
         # Return default config if file doesn't exist
-        return Config()
+        config_obj = Config()
+
+    # Environment variable overrides
+    rtmp_host = os.environ.get("RTMP_HOST")
+    if rtmp_host:
+        config_obj.streaming.rtmp.host = rtmp_host
+
+    return config_obj
 
 
 # Global config instance - loaded once when module is imported

@@ -125,7 +125,7 @@ capture/
 ├── transcriber.py   # Transcription via STTD client
 ├── sttd_client.py   # HTTP client for STTD service
 ├── frame.py         # Perceptual hashing, deduplication
-└── stream_server.py # RTMP streaming support
+└── stream_server.py # Stream session management, nginx-rtmp callbacks
 
 storage/
 ├── db.py            # DuckDB operations
@@ -170,13 +170,14 @@ Key tables with temporal indexing:
 5. Extract and transcribe audio with Whisper
 6. Store all data with absolute UTC timestamps
 
-### Stream Processing
-1. Create stream session with unique key
-2. Start RTMP server on port 1935
-3. Auto-detect stream resolution from first frame
-4. Extract frames at 1 fps (configurable)
-5. Apply same deduplication as video processing
-6. Store frames in real-time
+### Stream Processing (nginx-rtmp Architecture)
+1. Create stream session via API (returns RTMP URL + stream key)
+2. OBS connects to nginx-rtmp container on port 1935
+3. nginx-rtmp validates stream key via HTTP callback to backend
+4. nginx's `exec_push` runs `stream_handler.py` which extracts frames via FFmpeg
+5. Frames are POSTed to backend's `/api/streams/{stream_key}/frame` endpoint
+6. Backend applies same deduplication as video processing
+7. When OBS disconnects, nginx notifies backend via `on_publish_done` callback
 
 ## API Endpoints
 
@@ -192,12 +193,18 @@ Key tables with temporal indexing:
 - `DELETE /api/annotations/{annotation_id}`: Delete annotation
 
 ### Streaming
-- `POST /api/streams/create`: Create new stream session
+- `POST /api/streams/create`: Create new stream session (returns RTMP URL + stream key)
 - `GET /api/streams`: List all streams
 - `GET /api/streams/{stream_key}`: Get stream details
-- `POST /api/streams/{stream_key}/start`: Start stream reception
 - `POST /api/streams/{stream_key}/stop`: Stop stream
 - `DELETE /api/streams/{stream_key}`: Delete stream session
+
+### RTMP Callbacks (internal - called by nginx-rtmp)
+- `POST /api/streams/rtmp-callback/publish`: Validates stream key when OBS connects
+- `POST /api/streams/rtmp-callback/publish-done`: Handles stream disconnection
+- `POST /api/streams/rtmp-callback/play`: Allows playback
+- `POST /api/streams/rtmp-callback/play-done`: Handles playback end
+- `POST /api/streams/{stream_key}/frame`: Receives frames from nginx's exec_push script
 
 ## Testing
 
@@ -273,6 +280,7 @@ api:
 streaming:
   rtmp:
     enabled: true
+    host: localhost             # External hostname for RTMP URLs (override with RTMP_HOST env var)
     port: 1935
     max_concurrent_streams: 10
   capture:
@@ -289,6 +297,9 @@ CUDA_VISIBLE_DEVICES=0          # CUDA device selection
 MEM_CONFIG_PATH=/app/config/config.yaml  # Config file location
 PYTHONUNBUFFERED=1             # Ensure logs are shown in real-time
 LOG_LEVEL=INFO                 # Logging level
+
+# Streaming
+RTMP_HOST=localhost            # External hostname for RTMP URLs (e.g., aria.tap for remote access)
 
 # Backend API
 BACKEND_URL=http://mem-backend:8000  # For inter-service communication

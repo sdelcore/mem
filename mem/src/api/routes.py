@@ -16,6 +16,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     UploadFile,
 )
 from fastapi.responses import StreamingResponse
@@ -629,15 +630,6 @@ async def get_stream(stream_key: str):
     return _build_stream_response(session)
 
 
-@router.post("/streams/{stream_key}/start")
-async def start_stream(stream_key: str):
-    """Start receiving stream from OBS Studio."""
-    rtmp_server = get_rtmp_server()
-    if not rtmp_server.start_stream(stream_key):
-        raise StreamError("Failed to start stream")
-    return {"message": f"Stream {stream_key} started successfully"}
-
-
 @router.post("/streams/{stream_key}/stop")
 async def stop_stream(stream_key: str):
     """Stop an active stream."""
@@ -662,6 +654,107 @@ async def get_streaming_status():
     rtmp_server = get_rtmp_server()
     status = rtmp_server.get_status()
     return StreamStatusResponse(server=status["server"], streams=status["streams"])
+
+
+# ============================================================================
+# RTMP Callback Endpoints (called by nginx-rtmp)
+# ============================================================================
+
+
+@router.post("/streams/rtmp-callback/publish")
+async def rtmp_publish_callback(
+    call: str = Form(...),
+    app: str = Form(...),
+    name: str = Form(...),  # This is the stream_key
+    addr: str = Form(default=""),
+    flashver: str = Form(default=""),
+    swfurl: str = Form(default=""),
+    tcurl: str = Form(default=""),
+    pageurl: str = Form(default=""),
+):
+    """Nginx-rtmp on_publish callback when OBS starts streaming.
+
+    Returns 2xx to allow publishing, anything else rejects the stream.
+    This is called by nginx-rtmp when a client (OBS) connects and starts publishing.
+    """
+    logger.info(f"RTMP publish callback: app={app}, name={name}, addr={addr}")
+
+    rtmp_server = get_rtmp_server()
+    if rtmp_server.on_publish(name, addr):
+        return Response(status_code=200, content="OK")
+
+    # Return 403 to reject - causes OBS "could not access stream key" error
+    logger.warning(f"Rejecting stream key {name} from {addr}")
+    raise HTTPException(status_code=403, detail="Invalid or inactive stream key")
+
+
+@router.post("/streams/rtmp-callback/publish-done")
+async def rtmp_publish_done_callback(
+    call: str = Form(...),
+    app: str = Form(...),
+    name: str = Form(...),
+    addr: str = Form(default=""),
+):
+    """Nginx-rtmp on_publish_done callback when OBS stops streaming."""
+    logger.info(f"RTMP publish-done callback: app={app}, name={name}")
+
+    rtmp_server = get_rtmp_server()
+    rtmp_server.on_publish_done(name)
+    return Response(status_code=200, content="OK")
+
+
+@router.post("/streams/rtmp-callback/play")
+async def rtmp_play_callback(
+    call: str = Form(default=""),
+    app: str = Form(default=""),
+    name: str = Form(default=""),
+    addr: str = Form(default=""),
+):
+    """Nginx-rtmp on_play callback. Allow all playback for now."""
+    logger.debug(f"RTMP play callback: app={app}, name={name}, addr={addr}")
+    return Response(status_code=200, content="OK")
+
+
+@router.post("/streams/rtmp-callback/play-done")
+async def rtmp_play_done_callback(
+    call: str = Form(default=""),
+    app: str = Form(default=""),
+    name: str = Form(default=""),
+    addr: str = Form(default=""),
+):
+    """Nginx-rtmp on_play_done callback."""
+    logger.debug(f"RTMP play-done callback: app={app}, name={name}")
+    return Response(status_code=200, content="OK")
+
+
+# ============================================================================
+# Frame Ingestion Endpoint (called by nginx exec_push via stream_handler.py)
+# ============================================================================
+
+
+@router.post("/streams/{stream_key}/frame")
+async def ingest_stream_frame(
+    stream_key: str,
+    file: UploadFile = File(...),
+):
+    """Receive a frame from nginx exec_push.
+
+    This endpoint is called by the stream_handler.py script running in the
+    nginx-rtmp container. It extracts frames from the RTMP stream using FFmpeg
+    and POSTs them here for processing.
+    """
+    rtmp_server = get_rtmp_server()
+
+    frame_data = await file.read()
+    if not frame_data:
+        logger.warning(f"Empty frame received for stream {stream_key}")
+        raise HTTPException(status_code=400, detail="Empty frame data")
+
+    if rtmp_server.ingest_frame(stream_key, frame_data):
+        return {"status": "ok"}
+
+    logger.warning(f"Failed to ingest frame for stream {stream_key}")
+    raise HTTPException(status_code=400, detail="Failed to ingest frame")
 
 
 # Voice profile endpoints

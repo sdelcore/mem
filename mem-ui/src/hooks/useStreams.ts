@@ -86,30 +86,6 @@ export const useCreateStream = () => {
   })
 }
 
-// Start stream mutation
-export const useStartStream = () => {
-  const queryClient = useQueryClient()
-  
-  return useMutation<{ message: string }, Error, string>({
-    mutationFn: async (streamKey) => {
-      const response = await fetch(`${API_BASE_URL}/api/streams/${streamKey}/start`, {
-        method: 'POST',
-      })
-      
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.detail || 'Failed to start stream')
-      }
-      
-      return response.json()
-    },
-    onSuccess: (_, streamKey) => {
-      queryClient.invalidateQueries({ queryKey: ['streams'] })
-      queryClient.invalidateQueries({ queryKey: ['stream', streamKey] })
-    },
-  })
-}
-
 // Stop stream mutation
 export const useStopStream = () => {
   const queryClient = useQueryClient()

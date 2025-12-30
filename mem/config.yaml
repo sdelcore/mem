@@ -15,7 +15,8 @@ capture:
     enable_deduplication: true
     similarity_threshold: 100.0
   audio:
-    chunk_duration_seconds: 300
+    chunk_duration_seconds: 60   # Smaller chunks for better accuracy
+    overlap_seconds: 5           # Overlap to prevent word cutoffs
     sample_rate: 16000
 
 files:
@@ -31,6 +32,7 @@ api:
 streaming:
   rtmp:
     enabled: true
+    host: localhost  # External hostname for RTMP URLs (override with RTMP_HOST env var)
     port: 1935
     max_concurrent_streams: 10
   capture:

@@ -1,16 +1,18 @@
-"""RTMP streaming server for OBS Studio integration."""
+"""RTMP streaming server for OBS Studio integration.
 
-import asyncio
-import json
+This module manages stream sessions and handles callbacks from nginx-rtmp.
+The actual RTMP ingestion is done by nginx-rtmp container, which notifies
+this backend via HTTP callbacks when streams start/stop.
+"""
+
 import logging
-import subprocess
-import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
-from queue import Queue
+from io import BytesIO
 from typing import Dict, Optional
+
+from PIL import Image
 
 from src.capture.pipeline import StreamCaptureProcessor
 from src.config import config
@@ -27,10 +29,10 @@ class StreamSession:
     stream_name: Optional[str] = None
     source_id: Optional[int] = None
     processor: Optional[StreamCaptureProcessor] = None
-    process: Optional[subprocess.Popen] = None
     status: str = "waiting"  # waiting, live, ended, error
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
+    client_addr: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
     fps: Optional[float] = None
@@ -40,11 +42,18 @@ class StreamSession:
 
 
 class RTMPServer:
-    """Manages RTMP server for receiving streams from OBS Studio."""
+    """Manages RTMP server sessions for receiving streams from OBS Studio.
+    
+    This class handles stream session lifecycle. The actual RTMP server
+    is nginx-rtmp which calls back to this backend for:
+    - on_publish: When OBS starts streaming (validates stream key)
+    - on_publish_done: When OBS stops streaming
+    - frame ingestion: Receives frames extracted by nginx's exec_push
+    """
 
     def __init__(self, port: int = 1935, max_streams: int = 10):
         """
-        Initialize RTMP server.
+        Initialize RTMP server manager.
 
         Args:
             port: RTMP server port (default 1935)
@@ -53,9 +62,6 @@ class RTMPServer:
         self.port = port
         self.max_streams = max_streams
         self.sessions: Dict[str, StreamSession] = {}
-        self.active = False
-        self.frame_queue = Queue()
-        self.worker_thread = None
 
     def generate_stream_key(self) -> str:
         """Generate a unique stream key."""
@@ -91,148 +97,146 @@ class RTMPServer:
 
         return session
 
-    def start_stream(self, stream_key: str) -> bool:
+    def on_publish(self, stream_key: str, client_addr: str = "") -> bool:
         """
-        Start receiving stream for a session.
+        Handle nginx-rtmp on_publish callback when OBS starts streaming.
+
+        This validates the stream key and initializes the stream processor.
 
         Args:
-            stream_key: Stream key to start
+            stream_key: The stream key from OBS
+            client_addr: Client IP address
 
         Returns:
-            True if started successfully
+            True if stream key is valid and stream started, False to reject
         """
         session = self.sessions.get(stream_key)
         if not session:
-            logger.error(f"Stream key {stream_key} not found")
+            logger.warning(f"on_publish: Unknown stream key {stream_key} from {client_addr}")
             return False
 
-        if session.status != "waiting":
+        if session.status not in ("waiting",):
             logger.warning(
-                f"Stream {stream_key} not in waiting state: {session.status}"
+                f"on_publish: Stream {stream_key} in unexpected state '{session.status}'"
             )
-            return False
+            # Allow reconnection if stream ended
+            if session.status == "ended":
+                logger.info(f"Allowing reconnection for ended stream {stream_key}")
+            else:
+                return False
 
         try:
             # Initialize stream processor
             session.processor = StreamCaptureProcessor()
             session.source_id = session.processor.start_stream(stream_type="rtmp")
-
-            # Start FFmpeg process to receive RTMP stream
-            # Output frames as JPEG at specified interval
-            ffmpeg_cmd = [
-                "ffmpeg",
-                "-listen",
-                "1",  # Act as server
-                "-i",
-                f"rtmp://localhost:{self.port}/live/{stream_key}",
-                "-f",
-                "image2pipe",  # Output as image pipe
-                "-vcodec",
-                "mjpeg",  # Output JPEG frames
-                "-r",
-                "1",  # 1 frame per second (configurable)
-                "-q:v",
-                "2",  # High quality JPEG
-                "-",  # Output to stdout
-            ]
-
-            session.process = subprocess.Popen(
-                ffmpeg_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=10**8,
-            )
-
             session.status = "live"
             session.started_at = datetime.now()
+            session.client_addr = client_addr
+            session.frames_received = 0
+            session.frames_stored = 0
+            session.width = None
+            session.height = None
 
-            # Start frame processing thread
-            thread = threading.Thread(
-                target=self._process_stream_frames, args=(session,)
+            logger.info(
+                f"Stream {stream_key} is now live from {client_addr}, source_id={session.source_id}"
             )
-            thread.daemon = True
-            thread.start()
-
-            logger.info(f"Started RTMP stream reception for {stream_key}")
             return True
 
         except Exception as e:
             logger.error(f"Failed to start stream {stream_key}: {e}")
             session.status = "error"
-            if session.processor:
-                session.processor.stop_stream()
             return False
 
-    def _process_stream_frames(self, session: StreamSession):
+    def on_publish_done(self, stream_key: str) -> bool:
         """
-        Process frames from FFmpeg output.
+        Handle nginx-rtmp on_publish_done callback when OBS stops streaming.
 
         Args:
-            session: StreamSession to process
+            stream_key: The stream key
+
+        Returns:
+            True if handled successfully
         """
-        jpeg_buffer = bytearray()
-        jpeg_start = b"\xff\xd8"  # JPEG start marker
-        jpeg_end = b"\xff\xd9"  # JPEG end marker
-        in_jpeg = False
+        session = self.sessions.get(stream_key)
+        if not session:
+            logger.warning(f"on_publish_done: Unknown stream key {stream_key}")
+            return False
+
+        if session.processor:
+            try:
+                session.processor.stop_stream()
+            except Exception as e:
+                logger.error(f"Error stopping processor for {stream_key}: {e}")
+
+        session.status = "ended"
+        session.ended_at = datetime.now()
+        session.processor = None
+
+        logger.info(
+            f"Stream {stream_key} ended. "
+            f"Frames: {session.frames_received} received, {session.frames_stored} stored"
+        )
+        return True
+
+    def ingest_frame(self, stream_key: str, frame_data: bytes) -> bool:
+        """
+        Ingest a frame from nginx exec_push.
+
+        This is called by the frame ingestion endpoint when nginx's
+        stream_handler.py POSTs extracted frames.
+
+        Args:
+            stream_key: The stream key
+            frame_data: JPEG frame data
+
+        Returns:
+            True if frame was processed successfully
+        """
+        session = self.sessions.get(stream_key)
+        if not session:
+            logger.warning(f"ingest_frame: Unknown stream key {stream_key}")
+            return False
+
+        if session.status != "live":
+            logger.warning(
+                f"ingest_frame: Stream {stream_key} not live (status={session.status})"
+            )
+            return False
+
+        if not session.processor:
+            logger.error(f"ingest_frame: No processor for stream {stream_key}")
+            return False
 
         try:
-            while session.status == "live" and session.process:
-                chunk = session.process.stdout.read(4096)
-                if not chunk:
-                    break
+            session.frames_received += 1
 
-                # Parse JPEG frames from stream
-                for i in range(len(chunk)):
-                    if not in_jpeg:
-                        # Look for JPEG start
-                        if chunk[i : i + 2] == jpeg_start:
-                            jpeg_buffer = bytearray(chunk[i:])
-                            in_jpeg = True
-                    else:
-                        jpeg_buffer.append(chunk[i])
-                        # Look for JPEG end
-                        if chunk[i - 1 : i + 1] == jpeg_end:
-                            # Complete JPEG frame found
-                            frame_data = bytes(jpeg_buffer)
-                            session.frames_received += 1
+            # Process frame with deduplication
+            session.processor.capture_frame(frame_data)
+            session.frames_stored += 1
 
-                            # Process frame (with auto dimension detection)
-                            try:
-                                session.processor.capture_frame(frame_data)
-                                session.frames_stored += 1
+            # Extract dimensions on first frame
+            if session.width is None:
+                try:
+                    img = Image.open(BytesIO(frame_data))
+                    session.width, session.height = img.size
+                    logger.info(
+                        f"Stream {stream_key} resolution: {session.width}x{session.height}"
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not extract frame dimensions: {e}")
 
-                                # Extract dimensions on first frame
-                                if session.width is None:
-                                    from PIL import Image
-                                    from io import BytesIO
+            # Log progress periodically
+            if session.frames_received % 60 == 0:  # Every 60 frames (~1 minute at 1fps)
+                logger.info(
+                    f"Stream {stream_key}: {session.frames_received} frames received, "
+                    f"{session.frames_stored} stored"
+                )
 
-                                    img = Image.open(BytesIO(frame_data))
-                                    session.width, session.height = img.size
-                                    logger.info(
-                                        f"Stream {session.stream_key} resolution: "
-                                        f"{session.width}x{session.height}"
-                                    )
-
-                            except Exception as e:
-                                logger.error(f"Failed to process frame: {e}")
-
-                            jpeg_buffer.clear()
-                            in_jpeg = False
+            return True
 
         except Exception as e:
-            logger.error(f"Stream processing error: {e}")
-            session.status = "error"
-
-        finally:
-            # Clean up
-            if session.processor:
-                session.processor.stop_stream()
-            session.status = "ended"
-            session.ended_at = datetime.now()
-            logger.info(
-                f"Stream {session.stream_key} ended. "
-                f"Frames: {session.frames_received} received, {session.frames_stored} stored"
-            )
+            logger.error(f"Failed to ingest frame for {stream_key}: {e}")
+            return False
 
     def stop_stream(self, stream_key: str) -> bool:
         """
@@ -249,14 +253,13 @@ class RTMPServer:
             return False
 
         if session.status == "live":
-            # Terminate FFmpeg process
-            if session.process:
-                session.process.terminate()
-                session.process.wait(timeout=5)
-
             # Stop processor
             if session.processor:
-                session.processor.stop_stream()
+                try:
+                    session.processor.stop_stream()
+                except Exception as e:
+                    logger.error(f"Error stopping processor for {stream_key}: {e}")
+                session.processor = None
 
             session.status = "ended"
             session.ended_at = datetime.now()
@@ -293,13 +296,26 @@ class RTMPServer:
         """
         Get RTMP URL for OBS configuration.
 
+        Uses the configured host (can be overridden via RTMP_HOST env var).
+
         Args:
             stream_key: Stream key
 
         Returns:
-            RTMP URL string
+            RTMP URL string for OBS Server field
         """
-        return f"rtmp://localhost:{self.port}/live/{stream_key}"
+        host = config.streaming.rtmp.host
+        return f"rtmp://{host}:{self.port}/live/{stream_key}"
+
+    def get_server_url(self) -> str:
+        """
+        Get the base RTMP server URL (without stream key).
+
+        Returns:
+            RTMP server URL for OBS Server field
+        """
+        host = config.streaming.rtmp.host
+        return f"rtmp://{host}:{self.port}/live"
 
     def get_status(self) -> dict:
         """Get server status and statistics."""
@@ -307,7 +323,8 @@ class RTMPServer:
 
         return {
             "server": {
-                "active": self.active,
+                "active": active_streams > 0,
+                "host": config.streaming.rtmp.host,
                 "port": self.port,
                 "max_streams": self.max_streams,
             },
@@ -318,6 +335,7 @@ class RTMPServer:
                     {
                         "session_id": s.session_id,
                         "stream_key": s.stream_key,
+                        "stream_name": s.stream_name,
                         "status": s.status,
                         "resolution": f"{s.width}x{s.height}" if s.width else None,
                         "frames_received": s.frames_received,

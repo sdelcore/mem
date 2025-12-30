@@ -35,8 +35,6 @@ class CaptureConfig:
         chunk_duration: int = None,
         overlap_seconds: int = None,
         image_quality: int = None,
-        whisper_model: str = None,
-        whisper_language: str = None,
     ):
         """
         Initialize capture configuration.
@@ -46,23 +44,11 @@ class CaptureConfig:
             chunk_duration: Audio chunk duration in seconds (uses config default if None)
             overlap_seconds: Overlap between audio chunks in seconds (uses config default if None)
             image_quality: JPEG quality (1-100) (uses config default if None)
-            whisper_model: Whisper model size (uses config default if None)
-            whisper_language: Language for transcription or "auto" (uses config default if None)
         """
-        self.frame_interval = (
-            frame_interval or app_config.capture.frame.interval_seconds
-        )
-        self.chunk_duration = (
-            chunk_duration or app_config.capture.audio.chunk_duration_seconds
-        )
-        self.overlap_seconds = overlap_seconds or getattr(
-            app_config.capture.audio, "overlap_seconds", 0
-        )
+        self.frame_interval = frame_interval or app_config.capture.frame.interval_seconds
+        self.chunk_duration = chunk_duration or app_config.capture.audio.chunk_duration_seconds
+        self.overlap_seconds = overlap_seconds or getattr(app_config.capture.audio, "overlap_seconds", 5)
         self.image_quality = image_quality or app_config.capture.frame.jpeg_quality
-        self.whisper_model = whisper_model or app_config.whisper.model
-        self.whisper_language = whisper_language or app_config.whisper.language
-        if self.whisper_language == "auto":
-            self.whisper_language = None
 
 
 class VideoCaptureProcessor:
@@ -78,16 +64,12 @@ class VideoCaptureProcessor:
         """
         self.db = Database(db_path or app_config.database.path)
         self.config = config or CaptureConfig()
-        self.transcriber = Transcriber(model_name=self.config.whisper_model)
+        self.transcriber = Transcriber()  # Uses global STTD client
         # Initialize frame processor with config settings
         self.enable_deduplication = app_config.capture.frame.enable_deduplication
         self.frame_processor = FrameProcessor(
             similarity_threshold=app_config.capture.frame.similarity_threshold
         )
-        # Pre-load the Whisper model to avoid delays during processing
-        logger.info("Pre-loading Whisper model...")
-        self.transcriber.load_model()
-        logger.info("Whisper model ready")
 
     def process_video(self, video_path: Path) -> dict[str, Any]:
         """
@@ -297,19 +279,8 @@ class VideoCaptureProcessor:
                 logger.warning(f"Could not extract audio: {e}")
                 return 0
 
-            # Detect language if auto
-            if self.config.whisper_language is None:
-                try:
-                    language = self.transcriber.detect_language(audio_path)
-                    logger.info(f"Detected language: {language}")
-                except Exception as e:
-                    logger.warning(f"Language detection failed: {e}")
-                    language = (
-                        app_config.whisper.fallback_language
-                    )  # Default to fallback language
-            else:
-                language = self.config.whisper_language
-                logger.info(f"Using configured language: {language}")
+            # Use English as the default language (STTD handles language detection)
+            language = "en"
 
             # Process audio in chunks with overlap
             transcript_count = 0
@@ -357,12 +328,11 @@ class VideoCaptureProcessor:
                     # Get segments for speaker and confidence extraction
                     segments = result.get("segments", [])
 
-                    # Calculate confidence
-                    confidence = self.transcriber.calculate_confidence(segments)
-
-                    # Extract speaker information
+                    # Extract speaker information and confidence from STTD response
                     speaker_name = self._get_primary_speaker(segments)
                     speaker_confidence = self._get_speaker_confidence(segments)
+                    # Use speaker confidence as overall confidence, or default to 1.0
+                    confidence = speaker_confidence if speaker_confidence is not None else 1.0
 
                     # Determine overlap timestamps if any
                     overlap_start_ts = None
@@ -384,20 +354,12 @@ class VideoCaptureProcessor:
                         text=result.get("text", ""),
                         confidence=confidence,
                         language=result.get("language", language),
-                        whisper_model=self.config.whisper_model,
+                        whisper_model="sttd",
                         has_overlap=chunk.get("has_overlap", False),
                         overlap_start=overlap_start_ts,
                         overlap_end=overlap_end_ts,
                         speaker_name=speaker_name,
                         speaker_confidence=speaker_confidence,
-                        metadata=(
-                            {
-                                "is_non_speech": result.get("is_non_speech", False),
-                                "audio_type": result.get("audio_type", None),
-                            }
-                            if result.get("is_non_speech", False)
-                            else None
-                        ),
                     )
 
                     # Store transcription
@@ -434,7 +396,7 @@ class StreamCaptureProcessor:
         """
         self.db = Database(db_path or app_config.database.path)
         self.config = config or CaptureConfig()
-        self.transcriber = Transcriber(model_name=self.config.whisper_model)
+        self.transcriber = Transcriber()  # Uses global STTD client
         # Initialize frame processor with config settings
         self.enable_deduplication = app_config.capture.frame.enable_deduplication
         self.frame_processor = FrameProcessor(

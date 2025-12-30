@@ -80,8 +80,15 @@ class CaptureService:
 class SearchService:
     def __init__(self, db_path: str = None):
         self.db_path = db_path or config.database.path
-        self.db = Database(db_path=self.db_path)
-        self.db.connect()
+        self._db = None
+
+    @property
+    def db(self) -> Database:
+        """Lazily connect to database on first access."""
+        if self._db is None:
+            self._db = Database(db_path=self.db_path)
+            self._db.connect()
+        return self._db
 
     def search_timeline(
         self,
@@ -405,8 +412,8 @@ class SearchService:
         }
 
     def __del__(self):
-        if hasattr(self, "db"):
-            self.db.disconnect()
+        if hasattr(self, "_db") and self._db is not None:
+            self._db.disconnect()
 
 
 class AnnotationService:
@@ -415,8 +422,15 @@ class AnnotationService:
 
     def __init__(self, db_path: str = None):
         self.db_path = db_path or config.database.path
-        self.db = Database(db_path=self.db_path)
-        self.db.connect()
+        self._db = None
+
+    @property
+    def db(self) -> Database:
+        """Lazily connect to database on first access."""
+        if self._db is None:
+            self._db = Database(db_path=self.db_path)
+            self._db.connect()
+        return self._db
 
     def get_or_create_user_annotations_source(self) -> int:
         """Get or create a source record for user annotations."""
@@ -566,8 +580,8 @@ class AnnotationService:
 
     def __del__(self):
         """Cleanup database connection."""
-        if hasattr(self, "db"):
-            self.db.disconnect()
+        if hasattr(self, "_db") and self._db is not None:
+            self._db.disconnect()
 
 
 class UserRecordingService:
@@ -578,9 +592,16 @@ class UserRecordingService:
 
     def __init__(self, db_path: str = None):
         self.db_path = db_path or config.database.path
-        self.db = Database(db_path=self.db_path)
-        self.db.connect()
+        self._db = None
         self._transcriber = None
+
+    @property
+    def db(self) -> Database:
+        """Lazily connect to database on first access."""
+        if self._db is None:
+            self._db = Database(db_path=self.db_path)
+            self._db.connect()
+        return self._db
 
     @property
     def transcriber(self):

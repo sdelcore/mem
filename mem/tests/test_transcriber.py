@@ -1,9 +1,9 @@
-"""Tests for the Faster-Whisper transcriber module."""
+"""Tests for the STTD-based transcriber module."""
 
 import tempfile
 import wave
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -12,17 +12,11 @@ from src.capture.transcriber import Transcriber
 
 
 @pytest.fixture
-def mock_config():
-    """Mock configuration for testing."""
-    config = MagicMock()
-    config.whisper.model = "base"
-    config.whisper.device = "cpu"
-    config.whisper.compute_type = "int8"
-    config.whisper.no_speech_threshold = 0.6
-    config.whisper.logprob_threshold = -1.0
-    config.whisper.detect_non_speech = True
-    config.capture.audio.sample_rate = 16000
-    return config
+def mock_sttd_client():
+    """Mock STTD client for testing."""
+    client = MagicMock()
+    client.health_check.return_value = True
+    return client
 
 
 @pytest.fixture
@@ -52,87 +46,46 @@ def temp_audio_file():
 class TestTranscriber:
     """Test cases for the Transcriber class."""
 
-    @patch("src.capture.transcriber.config")
-    @patch("src.capture.transcriber.WhisperModel")
-    def test_init(self, mock_whisper_model, mock_config_module):
-        """Test transcriber initialization."""
-        mock_config_module.whisper.model = "base"
-        mock_config_module.whisper.device = "cpu"
-        # Mock getattr to return default value
-        mock_config_module.whisper.compute_type = "float16"
+    def test_init_with_client(self, mock_sttd_client):
+        """Test transcriber initialization with provided client."""
+        transcriber = Transcriber(sttd_client=mock_sttd_client)
+        assert transcriber.client == mock_sttd_client
+
+    def test_init_lazy_client(self):
+        """Test transcriber initialization without client uses lazy loading."""
+        transcriber = Transcriber()
+        assert transcriber._client is None
+
+    @patch("src.capture.transcriber.get_sttd_client")
+    def test_client_property_creates_client(self, mock_get_client):
+        """Test that client property creates client on first access."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
 
         transcriber = Transcriber()
+        client = transcriber.client
 
-        assert transcriber.model_name == "base"
-        assert transcriber.device == "cpu"
-        assert transcriber.compute_type == "float16"  # default
-        assert transcriber.model is None
+        mock_get_client.assert_called_once()
+        assert client == mock_client
 
-    @patch("src.capture.transcriber.config")
-    @patch("src.capture.transcriber.WhisperModel")
-    def test_init_with_params(self, mock_whisper_model, mock_config_module):
-        """Test transcriber initialization with custom parameters."""
-        transcriber = Transcriber(
-            model_name="large", device="cuda", compute_type="float16"
-        )
-
-        assert transcriber.model_name == "large"
-        assert transcriber.device == "cuda"
-        assert transcriber.compute_type == "float16"
-
-    @patch("src.capture.transcriber.config")
-    @patch("src.capture.transcriber.WhisperModel")
-    def test_load_model(self, mock_whisper_model, mock_config_module):
-        """Test model loading."""
-        mock_config_module.whisper.model = "base"
-        mock_config_module.whisper.device = "cpu"
-        mock_config_module.whisper.compute_type = "float16"
-
-        mock_model_instance = MagicMock()
-        mock_whisper_model.return_value = mock_model_instance
-
-        transcriber = Transcriber()
-        transcriber.load_model()
-
-        # Check model was created with correct parameters
-        mock_whisper_model.assert_called_once_with(
-            "base", device="cpu", compute_type="float16", cpu_threads=4, num_workers=1
-        )
-        assert transcriber.model == mock_model_instance
-
-        # Test that model is not loaded again
-        transcriber.load_model()
-        assert mock_whisper_model.call_count == 1
-
-    @patch("src.capture.transcriber.config")
-    @patch("src.capture.transcriber.WhisperModel")
-    def test_transcribe_audio(
-        self, mock_whisper_model, mock_config_module, temp_audio_file
-    ):
-        """Test audio transcription."""
-        mock_config_module.whisper.model = "base"
-        mock_config_module.whisper.device = "cpu"
-        mock_config_module.whisper.no_speech_threshold = 0.6
-        mock_config_module.whisper.logprob_threshold = -1.0
-        mock_config_module.whisper.detect_non_speech = False
-
+    def test_transcribe_audio(self, mock_sttd_client, temp_audio_file):
+        """Test audio transcription via STTD."""
         # Mock the transcribe result
-        mock_segment = Mock()
-        mock_segment.start = 0.0
-        mock_segment.end = 1.0
-        mock_segment.text = " Hello world "
-        mock_segment.no_speech_prob = 0.1
-        mock_segment.avg_logprob = -0.5
-        mock_segment.compression_ratio = 1.5
+        mock_sttd_client.transcribe_file.return_value = {
+            "text": "Hello world",
+            "segments": [
+                {
+                    "start": 0.0,
+                    "end": 1.0,
+                    "text": "Hello world",
+                    "speaker": "alice",
+                    "confidence": 0.95,
+                }
+            ],
+            "language": "en",
+        }
 
-        mock_info = Mock()
-        mock_info.language = "en"
-
-        mock_model_instance = MagicMock()
-        mock_model_instance.transcribe.return_value = ([mock_segment], mock_info)
-        mock_whisper_model.return_value = mock_model_instance
-
-        transcriber = Transcriber()
+        transcriber = Transcriber(sttd_client=mock_sttd_client)
         result = transcriber.transcribe_audio(temp_audio_file)
 
         assert result["text"] == "Hello world"
@@ -140,63 +93,59 @@ class TestTranscriber:
         assert result["is_non_speech"] is False
         assert len(result["segments"]) == 1
         assert result["segments"][0]["text"] == "Hello world"
+        assert result["segments"][0]["speaker"] == "alice"
 
-    @patch("src.capture.transcriber.config")
-    @patch("src.capture.transcriber.WhisperModel")
-    def test_transcribe_audio_non_speech(
-        self, mock_whisper_model, mock_config_module, temp_audio_file
-    ):
+    def test_transcribe_audio_non_speech(self, mock_sttd_client, temp_audio_file):
         """Test non-speech audio detection."""
-        mock_config_module.whisper.model = "base"
-        mock_config_module.whisper.device = "cpu"
-        mock_config_module.whisper.no_speech_threshold = 0.6
-        mock_config_module.whisper.logprob_threshold = -1.0
-        mock_config_module.whisper.detect_non_speech = True
-
         # Mock a segment that looks like music
-        mock_segment = Mock()
-        mock_segment.start = 0.0
-        mock_segment.end = 1.0
-        mock_segment.text = " ♪♪♪ "
-        mock_segment.no_speech_prob = 0.8
-        mock_segment.avg_logprob = -2.0
-        mock_segment.compression_ratio = 3.0
+        mock_sttd_client.transcribe_file.return_value = {
+            "text": "♪♪♪",
+            "segments": [
+                {
+                    "start": 0.0,
+                    "end": 1.0,
+                    "text": "♪♪♪",
+                    "no_speech_prob": 0.8,
+                }
+            ],
+            "language": "en",
+        }
 
-        mock_info = Mock()
-        mock_info.language = "en"
-
-        mock_model_instance = MagicMock()
-        mock_model_instance.transcribe.return_value = ([mock_segment], mock_info)
-        mock_whisper_model.return_value = mock_model_instance
-
-        transcriber = Transcriber()
+        transcriber = Transcriber(sttd_client=mock_sttd_client)
         result = transcriber.transcribe_audio(temp_audio_file)
 
         assert result["is_non_speech"] is True
         assert result["audio_type"] == "[Music]"
         assert result["text"] == "[Music]"
 
-    @patch("src.capture.transcriber.config")
-    @patch("src.capture.transcriber.WhisperModel")
-    def test_detect_language(
-        self, mock_whisper_model, mock_config_module, temp_audio_file
-    ):
-        """Test language detection."""
-        mock_config_module.whisper.model = "base"
-        mock_config_module.whisper.device = "cpu"
+    def test_transcribe_audio_strips_speaker_prefix(self, mock_sttd_client, temp_audio_file):
+        """Test that speaker prefixes are stripped from text."""
+        mock_sttd_client.transcribe_file.return_value = {
+            "text": "[Unknown]: Hello there",
+            "segments": [
+                {
+                    "start": 0.0,
+                    "end": 1.0,
+                    "text": "[Unknown]: Hello there",
+                    "speaker": None,
+                }
+            ],
+            "language": "en",
+        }
 
-        mock_info = Mock()
-        mock_info.language = "es"
-        mock_info.language_probability = 0.95
+        transcriber = Transcriber(sttd_client=mock_sttd_client)
+        result = transcriber.transcribe_audio(temp_audio_file)
 
-        mock_model_instance = MagicMock()
-        mock_model_instance.transcribe.return_value = ([], mock_info)
-        mock_whisper_model.return_value = mock_model_instance
+        # Speaker prefix should be stripped from segment text
+        assert result["segments"][0]["text"] == "Hello there"
 
-        transcriber = Transcriber()
-        language = transcriber.detect_language(temp_audio_file)
+    def test_health_check(self, mock_sttd_client):
+        """Test health check passes through to client."""
+        mock_sttd_client.health_check.return_value = True
 
-        assert language == "es"
+        transcriber = Transcriber(sttd_client=mock_sttd_client)
+        assert transcriber.health_check() is True
+        mock_sttd_client.health_check.assert_called_once()
 
     def test_detect_non_speech_patterns(self):
         """Test non-speech pattern detection."""
@@ -215,11 +164,8 @@ class TestTranscriber:
         # Test silence
         assert transcriber.detect_non_speech_patterns("") == "[Silence]"
 
-        # Test repetitive audio (changed expectation based on actual behavior)
-        assert (
-            transcriber.detect_non_speech_patterns("la la la la")
-            == "[Repetitive Audio]"
-        )
+        # Test repetitive audio
+        assert transcriber.detect_non_speech_patterns("la la la la") == "[Repetitive Audio]"
 
         # Test normal text
         assert transcriber.detect_non_speech_patterns("Hello world") == ""
@@ -235,18 +181,8 @@ class TestTranscriber:
 
         # Test with high no_speech probability
         segments = [
-            {
-                "no_speech_prob": 0.8,
-                "text": "",
-                "avg_logprob": -0.5,
-                "compression_ratio": 1.0,
-            },
-            {
-                "no_speech_prob": 0.9,
-                "text": "",
-                "avg_logprob": -0.5,
-                "compression_ratio": 1.0,
-            },
+            {"no_speech_prob": 0.8, "text": "", "avg_logprob": -0.5},
+            {"no_speech_prob": 0.9, "text": "", "avg_logprob": -0.5},
         ]
         result = transcriber.analyze_segments_for_speech(segments)
         assert result["is_non_speech"] is True
@@ -254,47 +190,36 @@ class TestTranscriber:
 
         # Test with normal speech segments
         segments = [
-            {
-                "no_speech_prob": 0.1,
-                "text": "Hello world",
-                "avg_logprob": -0.3,
-                "compression_ratio": 1.2,
-            },
-            {
-                "no_speech_prob": 0.2,
-                "text": "How are you",
-                "avg_logprob": -0.4,
-                "compression_ratio": 1.3,
-            },
+            {"no_speech_prob": 0.1, "text": "Hello world", "avg_logprob": -0.3},
+            {"no_speech_prob": 0.2, "text": "How are you", "avg_logprob": -0.4},
         ]
         result = transcriber.analyze_segments_for_speech(segments)
         assert result["is_non_speech"] is False
 
-    def test_calculate_confidence(self):
-        """Test confidence calculation."""
+    def test_classify_non_speech_type(self):
+        """Test classification of non-speech audio types."""
         transcriber = Transcriber()
 
-        # Test with no segments
-        assert transcriber.calculate_confidence([]) == 0.0
+        # Test music classification
+        analysis = {"is_non_speech": True, "high_compression_count": 5}
+        assert transcriber.classify_non_speech_type(analysis, "") == "[Music]"
 
-        # Test with segments
-        segments = [
-            {"avg_logprob": -0.5},  # exp(-0.5) ≈ 0.606
-            {"avg_logprob": -1.0},  # exp(-1.0) ≈ 0.368
-        ]
-        confidence = transcriber.calculate_confidence(segments)
-        assert 0.4 < confidence < 0.6  # Average of probabilities
+        # Test silence classification
+        analysis = {"is_non_speech": True, "empty_text_ratio": 0.9}
+        assert transcriber.classify_non_speech_type(analysis, "") == "[Silence]"
+
+        # Test background noise classification
+        analysis = {"is_non_speech": True, "no_speech_ratio": 0.8}
+        assert transcriber.classify_non_speech_type(analysis, "") == "[Background Noise]"
+
+        # Test applause from text
+        analysis = {"is_non_speech": True}
+        assert transcriber.classify_non_speech_type(analysis, "[applause]") == "[Applause]"
 
     @patch("src.capture.transcriber.config")
-    @patch("src.capture.transcriber.WhisperModel")
-    def test_transcribe_chunk(self, mock_whisper_model, mock_config_module):
+    def test_transcribe_chunk(self, mock_config, mock_sttd_client):
         """Test transcribing audio chunks from bytes."""
-        mock_config_module.whisper.model = "base"
-        mock_config_module.whisper.device = "cpu"
-        mock_config_module.whisper.no_speech_threshold = 0.6
-        mock_config_module.whisper.logprob_threshold = -1.0
-        mock_config_module.whisper.detect_non_speech = False
-        mock_config_module.capture.audio.sample_rate = 16000
+        mock_config.capture.audio.sample_rate = 16000
 
         # Create audio data
         sample_rate = 16000
@@ -304,24 +229,22 @@ class TestTranscriber:
         audio_data = (np.sin(2 * np.pi * frequency * t) * 32767).astype(np.int16)
 
         # Mock transcribe result
-        mock_segment = Mock()
-        mock_segment.start = 0.0
-        mock_segment.end = 1.0
-        mock_segment.text = " Test audio "
-        mock_segment.no_speech_prob = 0.1
-        mock_segment.avg_logprob = -0.5
-        mock_segment.compression_ratio = 1.5
+        mock_sttd_client.transcribe_file.return_value = {
+            "text": "Test audio",
+            "segments": [
+                {"start": 0.0, "end": 1.0, "text": "Test audio", "speaker": None}
+            ],
+            "language": "en",
+        }
 
-        mock_info = Mock()
-        mock_info.language = "en"
-
-        mock_model_instance = MagicMock()
-        mock_model_instance.transcribe.return_value = ([mock_segment], mock_info)
-        mock_whisper_model.return_value = mock_model_instance
-
-        transcriber = Transcriber()
+        transcriber = Transcriber(sttd_client=mock_sttd_client)
         result = transcriber.transcribe_chunk(audio_data.tobytes())
 
         assert result["text"] == "Test audio"
         assert result["language"] == "en"
         assert result["is_non_speech"] is False
+
+    def test_unload(self, mock_sttd_client):
+        """Test unload is a no-op for HTTP client."""
+        transcriber = Transcriber(sttd_client=mock_sttd_client)
+        transcriber.unload()  # Should not raise

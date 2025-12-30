@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
-import { Camera, Play, Square, Copy, Trash2, Circle, AlertCircle } from 'lucide-react'
-import { StreamSession, useStartStream, useStopStream, useDeleteStream, copyToClipboard } from '../../hooks/useStreams'
+import { Camera, Square, Copy, Trash2, Circle, AlertCircle } from 'lucide-react'
+import { StreamSession, useStopStream, useDeleteStream, copyToClipboard } from '../../hooks/useStreams'
 import { format } from 'date-fns'
 
 interface StreamCardProps {
@@ -12,26 +12,16 @@ const StreamCard: React.FC<StreamCardProps> = ({ stream, onRefresh }) => {
   const [showDetails, setShowDetails] = useState(false)
   const [copied, setCopied] = useState<'url' | 'key' | null>(null)
   
-  const startMutation = useStartStream()
   const stopMutation = useStopStream()
   const deleteMutation = useDeleteStream()
 
-  const isLoading = startMutation.isPending || stopMutation.isPending || deleteMutation.isPending
+  const isLoading = stopMutation.isPending || deleteMutation.isPending
 
   const handleCopy = async (text: string, type: 'url' | 'key') => {
     const success = await copyToClipboard(text)
     if (success) {
       setCopied(type)
       setTimeout(() => setCopied(null), 2000)
-    }
-  }
-
-  const handleStart = async () => {
-    try {
-      await startMutation.mutateAsync(stream.stream_key)
-      onRefresh?.()
-    } catch (error) {
-      console.error('Failed to start stream:', error)
     }
   }
 
@@ -55,6 +45,12 @@ const StreamCard: React.FC<StreamCardProps> = ({ stream, onRefresh }) => {
     }
   }
 
+  // Extract server URL from rtmp_url (remove stream key path component)
+  // e.g., "rtmp://aria.tap:1935/live/uuid" -> "rtmp://aria.tap:1935/live"
+  const rtmpServerUrl = stream.rtmp_url 
+    ? stream.rtmp_url.substring(0, stream.rtmp_url.lastIndexOf('/'))
+    : 'rtmp://localhost:1935/live'
+
   const getStatusIcon = () => {
     switch (stream.status) {
       case 'live':
@@ -68,7 +64,7 @@ const StreamCard: React.FC<StreamCardProps> = ({ stream, onRefresh }) => {
         return (
           <div className="flex items-center space-x-1">
             <Circle className="w-3 h-3 fill-amber-500 text-amber-500" />
-            <span className="text-sm font-medium text-amber-600">Waiting</span>
+            <span className="text-sm font-medium text-amber-600">Waiting for OBS</span>
           </div>
         )
       case 'ended':
@@ -150,7 +146,7 @@ const StreamCard: React.FC<StreamCardProps> = ({ stream, onRefresh }) => {
           <div className="flex items-center justify-between mb-1">
             <p className="text-xs font-semibold text-sage-600">RTMP Server URL</p>
             <button
-              onClick={() => handleCopy('rtmp://localhost:1935/live', 'url')}
+              onClick={() => handleCopy(rtmpServerUrl, 'url')}
               className="flex items-center space-x-1 px-2 py-1 text-xs bg-white rounded hover:bg-forest-50 transition-colors"
               title="Copy RTMP URL"
             >
@@ -163,7 +159,7 @@ const StreamCard: React.FC<StreamCardProps> = ({ stream, onRefresh }) => {
             </button>
           </div>
           <p className="text-xs font-mono text-forest-700 bg-white rounded px-2 py-1">
-            rtmp://localhost:1935/live
+            {rtmpServerUrl}
           </p>
         </div>
         
@@ -190,7 +186,8 @@ const StreamCard: React.FC<StreamCardProps> = ({ stream, onRefresh }) => {
         
         <div className="bg-forest-50 border border-forest-200 rounded p-2">
           <p className="text-xs text-forest-600">
-            <strong>OBS Setup:</strong> Use both the Server URL and Stream Key above in your OBS settings.
+            <strong>OBS Setup:</strong> In OBS, go to Settings &rarr; Stream, select "Custom" service, 
+            paste the Server URL above, and enter the Stream Key. Then click "Start Streaming" in OBS.
           </p>
         </div>
       </div>
@@ -205,17 +202,6 @@ const StreamCard: React.FC<StreamCardProps> = ({ stream, onRefresh }) => {
         </button>
         
         <div className="flex items-center space-x-2">
-          {stream.status === 'waiting' && (
-            <button
-              onClick={handleStart}
-              disabled={isLoading}
-              className="p-1.5 rounded hover:bg-sage-50 text-sage-500 disabled:opacity-50"
-              title="Start receiving stream"
-            >
-              <Play className="w-4 h-4" />
-            </button>
-          )}
-
           {stream.status === 'live' && (
             <button
               onClick={handleStop}
