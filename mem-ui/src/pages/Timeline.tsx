@@ -1,36 +1,36 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
-import { Menu, X, Settings } from 'lucide-react'
+import DatePicker from 'react-datepicker'
+import { Menu, X, Settings, Calendar, ChevronLeft, ChevronRight } from 'lucide-react'
 import TimelineComponent from '../components/Timeline/Timeline'
 import VideoUpload from '../components/Upload/VideoUpload'
 import SearchBar from '../components/Search/SearchBar'
 import ContentViewer from '../components/Content/ContentViewer'
-import Sidebar from '../components/Sidebar/Sidebar'
 import StreamManager from '../components/Stream/StreamManager'
 import { VoiceProfileManager } from '../components/VoiceProfile'
 import VoiceRecorder from '../components/VoiceRecorder/VoiceRecorder'
 import { useTimeline } from '../hooks/useTimeline'
+import 'react-datepicker/dist/react-datepicker.css'
 
 function Timeline() {
   const [selectedTime, setSelectedTime] = useState<Date | null>(null)
   const [selectedRange, setSelectedRange] = useState<{ start: Date; end: Date } | null>(null)
   const [selectedDate, setSelectedDate] = useState<Date>(new Date())
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true)
   const [timeOffset, setTimeOffset] = useState(0)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [showCalendar, setShowCalendar] = useState(false)
+  const calendarRef = useRef<HTMLDivElement>(null)
 
-  // Auto-collapse sidebar on mobile
+  // Close calendar when clicking outside
   useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth < 768) {
-        setIsSidebarCollapsed(true)
-        setIsMobileMenuOpen(false)
+    const handleClickOutside = (event: MouseEvent) => {
+      if (calendarRef.current && !calendarRef.current.contains(event.target as Node)) {
+        setShowCalendar(false)
       }
     }
-    handleResize()
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
   // Calculate time range based on selected date and offset (always 24h view)
@@ -70,13 +70,38 @@ function Timeline() {
     setSelectedRange(null)
   }
 
+  const handleNavigateToUpload = (timestamp: Date) => {
+    setSelectedDate(timestamp)
+    setSelectedTime(timestamp)
+    setTimeOffset(0)
+    setIsMobileMenuOpen(false)
+  }
+
   const handleDateChange = (date: Date) => {
     setSelectedDate(date)
     // Clear selections and reset offset when changing date
     setSelectedTime(null)
     setSelectedRange(null)
     setTimeOffset(0)
+    setShowCalendar(false)
   }
+
+  const handlePreviousDay = () => {
+    const newDate = new Date(selectedDate)
+    newDate.setDate(newDate.getDate() - 1)
+    handleDateChange(newDate)
+  }
+
+  const handleNextDay = () => {
+    const newDate = new Date(selectedDate)
+    newDate.setDate(newDate.getDate() + 1)
+    // Don't allow future dates
+    if (newDate <= new Date()) {
+      handleDateChange(newDate)
+    }
+  }
+
+  const isToday = format(selectedDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
 
   const handleNavigatePrevious = () => {
     setTimeOffset(prev => prev - 1)
@@ -122,16 +147,56 @@ function Timeline() {
 
               {/* Desktop controls */}
               <div className="hidden md:flex items-center gap-4">
-                {/* Today Button */}
-                <button
-                  onClick={() => {
-                    setSelectedDate(new Date())
-                    setTimeOffset(0)
-                  }}
-                  className="px-4 py-2.5 min-h-11 text-sm font-medium text-forest-600 hover:bg-forest-100 rounded-lg transition-colors"
-                >
-                  Today
-                </button>
+                {/* Calendar Date Picker */}
+                <div className="relative" ref={calendarRef}>
+                  <div className="flex items-center">
+                    <button
+                      onClick={handlePreviousDay}
+                      className="p-2 hover:bg-forest-100 rounded-l-lg transition-colors"
+                      aria-label="Previous day"
+                    >
+                      <ChevronLeft className="w-4 h-4 text-forest-600" />
+                    </button>
+                    <button
+                      onClick={() => setShowCalendar(!showCalendar)}
+                      className="flex items-center gap-2 px-3 py-2 min-h-11 text-sm font-medium text-forest-600 hover:bg-forest-100 transition-colors"
+                    >
+                      <Calendar className="w-4 h-4" />
+                      <span>{format(selectedDate, 'MMM dd')}</span>
+                    </button>
+                    <button
+                      onClick={handleNextDay}
+                      disabled={isToday}
+                      className="p-2 hover:bg-forest-100 rounded-r-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      aria-label="Next day"
+                    >
+                      <ChevronRight className="w-4 h-4 text-forest-600" />
+                    </button>
+                  </div>
+                  {showCalendar && (
+                    <div className="absolute top-full mt-2 right-0 z-50 bg-white rounded-lg shadow-lg border border-cream-200 p-2">
+                      <DatePicker
+                        selected={selectedDate}
+                        onChange={(date) => date && handleDateChange(date)}
+                        maxDate={new Date()}
+                        inline
+                        calendarClassName="earthy-calendar"
+                      />
+                      {!isToday && (
+                        <button
+                          onClick={() => {
+                            setSelectedDate(new Date())
+                            setTimeOffset(0)
+                            setShowCalendar(false)
+                          }}
+                          className="w-full mt-2 px-3 py-2 bg-forest-500 hover:bg-forest-600 text-white text-sm rounded-lg transition-colors"
+                        >
+                          Go to Today
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <SearchBar
                   placeholder="Search transcripts..."
                   onSearch={() => {}}
@@ -143,6 +208,7 @@ function Timeline() {
                 <VideoUpload
                   onUploadSuccess={handleUploadSuccess}
                   onUploadError={(error) => console.error('Upload error:', error)}
+                  onNavigateToTime={handleNavigateToUpload}
                 />
                 {/* Settings Link */}
                 <Link
@@ -160,17 +226,60 @@ function Timeline() {
           {isMobileMenuOpen && (
             <div className="md:hidden absolute top-14 left-0 right-0 bg-cream-100/95 backdrop-blur-lg border-b border-sage-200/50 shadow-lg z-50 animate-slide-down">
               <div className="px-4 py-4 space-y-4">
-                {/* Today Button - full width */}
-                <button
-                  onClick={() => {
-                    setSelectedDate(new Date())
-                    setTimeOffset(0)
-                    setIsMobileMenuOpen(false)
-                  }}
-                  className="w-full px-4 py-3 min-h-11 text-sm font-medium text-forest-600 bg-cream-50 hover:bg-forest-100 rounded-lg transition-colors"
-                >
-                  Today
-                </button>
+                {/* Date picker for mobile */}
+                <div className="bg-cream-50 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-3">
+                    <button
+                      onClick={handlePreviousDay}
+                      className="p-2 min-h-11 min-w-11 hover:bg-cream-200 rounded-lg transition-colors flex items-center justify-center"
+                      aria-label="Previous day"
+                    >
+                      <ChevronLeft className="w-5 h-5 text-forest-600" />
+                    </button>
+                    <div className="flex flex-col items-center">
+                      <span className="text-lg font-semibold text-forest-700">
+                        {format(selectedDate, 'EEEE')}
+                      </span>
+                      <span className="text-sm text-sage-500">
+                        {format(selectedDate, 'MMM dd, yyyy')}
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleNextDay}
+                      disabled={isToday}
+                      className="p-2 min-h-11 min-w-11 hover:bg-cream-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                      aria-label="Next day"
+                    >
+                      <ChevronRight className="w-5 h-5 text-forest-600" />
+                    </button>
+                  </div>
+                  <div className="flex justify-center">
+                    <DatePicker
+                      selected={selectedDate}
+                      onChange={(date) => {
+                        if (date) {
+                          handleDateChange(date)
+                          setIsMobileMenuOpen(false)
+                        }
+                      }}
+                      maxDate={new Date()}
+                      inline
+                      calendarClassName="earthy-calendar"
+                    />
+                  </div>
+                  {!isToday && (
+                    <button
+                      onClick={() => {
+                        setSelectedDate(new Date())
+                        setTimeOffset(0)
+                        setIsMobileMenuOpen(false)
+                      }}
+                      className="w-full mt-3 px-4 py-2.5 min-h-11 bg-forest-500 hover:bg-forest-600 text-white text-sm font-medium rounded-lg transition-colors"
+                    >
+                      Go to Today
+                    </button>
+                  )}
+                </div>
 
                 {/* Search - full width */}
                 <SearchBar
@@ -190,6 +299,7 @@ function Timeline() {
                   <VideoUpload
                     onUploadSuccess={handleUploadSuccess}
                     onUploadError={(error) => console.error('Upload error:', error)}
+                    onNavigateToTime={handleNavigateToUpload}
                   />
                   <Link
                     to="/settings"
@@ -303,18 +413,6 @@ function Timeline() {
         </div>
       </main>
     </div>
-
-    {/* Sidebar */}
-    <Sidebar
-      selectedDate={selectedDate}
-      onDateChange={handleDateChange}
-      onTimeSelect={handleTimeSelect}
-      onRangeSelect={handleRangeSelect}
-      data={timelineData || []}
-      currentTime={new Date()}
-      isCollapsed={isSidebarCollapsed}
-      onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-    />
   </div>
   )
 }
