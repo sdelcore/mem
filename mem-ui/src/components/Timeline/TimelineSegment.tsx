@@ -39,7 +39,7 @@ const TimelineSegment: React.FC<TimelineSegmentProps> = ({
         }}
       />
       {/* Show indicator for multiple sources */}
-      {segment.sourceCount && segment.sourceCount > 1 && (
+      {(segment.sourceCount ?? 0) > 1 && (
         <div className="absolute top-0 right-0 bg-forest-500 text-cream-50 text-xs rounded-full w-4 h-4 flex items-center justify-center">
           {segment.sourceCount}
         </div>

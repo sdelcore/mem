@@ -114,11 +114,11 @@ const VoiceRecorder: React.FC = () => {
     return (
       <button
         onClick={handleClick}
-        className="flex items-center space-x-2 px-4 py-2.5 min-h-11 rounded-lg bg-red-500 text-white animate-pulse"
+        className="flex items-center gap-1 p-2.5 min-h-11 rounded-lg bg-red-500 text-white animate-pulse"
         title="Stop recording"
       >
         <Square className="w-5 h-5" />
-        <span className="font-medium">{formatDuration(recordingDuration)}</span>
+        <span className="text-xs font-medium">{formatDuration(recordingDuration)}</span>
       </button>
     )
   }
@@ -128,10 +128,10 @@ const VoiceRecorder: React.FC = () => {
     return (
       <button
         disabled
-        className="flex items-center space-x-2 px-4 py-2.5 min-h-11 rounded-lg bg-sage-300 text-cream-50 opacity-75"
+        className="p-2.5 min-h-11 min-w-11 rounded-lg bg-sage-300 text-cream-50 opacity-75"
+        title="Transcribing..."
       >
         <div className="w-5 h-5 border-2 border-cream-50 border-t-transparent rounded-full animate-spin" />
-        <span className="font-medium hidden sm:inline">Transcribing...</span>
       </button>
     )
   }
@@ -140,11 +140,10 @@ const VoiceRecorder: React.FC = () => {
   return (
     <button
       onClick={handleClick}
-      className="flex items-center space-x-2 px-4 py-2.5 min-h-11 rounded-lg transition-all bg-sage-400 text-cream-50 hover:bg-sage-500"
+      className="p-2.5 min-h-11 min-w-11 rounded-lg transition-all bg-sage-400 text-cream-50 hover:bg-sage-500"
       title="Record voice note"
     >
       <Mic className="w-5 h-5" />
-      <span className="font-medium hidden sm:inline">Record</span>
     </button>
   )
 }

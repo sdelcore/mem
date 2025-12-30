@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Camera, X, ChevronDown } from 'lucide-react'
+import { Camera, X } from 'lucide-react'
 import { useStreams } from '../../hooks/useStreams'
 import StreamControls from './StreamControls'
 import StreamCard from './StreamCard'
@@ -36,19 +36,17 @@ const StreamManager: React.FC = () => {
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className={`
-          flex items-center space-x-2 px-4 py-2.5 min-h-11 rounded-lg transition-all
+          flex items-center gap-1 p-2.5 min-h-11 min-w-11 rounded-lg transition-all
           ${isExpanded
             ? 'bg-forest-600 text-cream-50'
             : 'bg-forest-500 text-cream-50 hover:bg-forest-600'
           }
         `}
+        title="Streams"
       >
         <Camera className="w-5 h-5" />
-        <span className="font-medium hidden sm:inline">Streams</span>
-        
-        {/* Active Stream Indicator */}
         {activeCount > 0 && (
-          <span className="flex items-center space-x-1">
+          <span className="flex items-center gap-1">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
@@ -56,10 +54,6 @@ const StreamManager: React.FC = () => {
             <span className="text-xs font-bold">{activeCount}</span>
           </span>
         )}
-        
-        <ChevronDown 
-          className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} 
-        />
       </button>
 
       {/* Dropdown Panel - responsive width */}

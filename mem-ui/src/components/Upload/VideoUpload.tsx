@@ -236,13 +236,13 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
       {/* Upload button */}
       <div className="flex items-center gap-2">
         <button
-          className="flex items-center gap-2 px-4 py-2.5 min-h-11 bg-forest-500 text-cream-50 rounded-lg font-medium text-sm hover:bg-forest-600 transition-colors duration-150"
+          className="flex items-center gap-1 p-2.5 min-h-11 min-w-11 bg-forest-500 text-cream-50 rounded-lg hover:bg-forest-600 transition-colors duration-150"
           onClick={() => fileInputRef.current?.click()}
+          title="Upload video"
         >
           <Upload className="w-5 h-5" />
-          <span className="hidden sm:inline">Upload</span>
           {totalCount > 0 && (
-            <span className="ml-1 px-2 py-0.5 bg-forest-600 rounded-full text-xs">
+            <span className="px-1.5 py-0.5 bg-forest-600 rounded-full text-xs">
               {totalCount}
             </span>
           )}

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { AudioLines, X, ChevronDown, User, AlertCircle } from 'lucide-react'
+import { AudioLines, X, User, AlertCircle } from 'lucide-react'
 import { useVoiceProfiles } from '../../hooks/useVoiceProfiles'
 import VoiceProfileForm from './VoiceProfileForm'
 import VoiceProfileCard from './VoiceProfileCard'
@@ -31,25 +31,20 @@ const VoiceProfileManager: React.FC = () => {
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className={`
-          flex items-center space-x-2 px-4 py-2.5 min-h-11 rounded-lg transition-all
+          flex items-center gap-1 p-2.5 min-h-11 min-w-11 rounded-lg transition-all
           ${isExpanded
             ? 'bg-sage-400 text-cream-50'
             : 'bg-sage-300 text-cream-50 hover:bg-sage-400'
           }
         `}
+        title="Voice Profiles"
       >
         <AudioLines className="w-5 h-5" />
-        <span className="font-medium hidden sm:inline">Voices</span>
-
         {profileCount > 0 && (
-          <span className="ml-1 px-2 py-0.5 bg-sage-500 rounded-full text-xs">
+          <span className="px-1.5 py-0.5 bg-sage-500 rounded-full text-xs">
             {profileCount}
           </span>
         )}
-
-        <ChevronDown
-          className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-        />
       </button>
 
       {/* Dropdown Panel - responsive width */}

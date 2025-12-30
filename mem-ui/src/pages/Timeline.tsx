@@ -149,28 +149,28 @@ function Timeline() {
               <div className="hidden md:flex items-center gap-4">
                 {/* Calendar Date Picker */}
                 <div className="relative" ref={calendarRef}>
-                  <div className="flex items-center">
+                  <div className="flex items-center bg-cream-50 rounded-lg border border-cream-200">
                     <button
                       onClick={handlePreviousDay}
-                      className="p-2 hover:bg-forest-100 rounded-l-lg transition-colors"
+                      className="p-2.5 hover:bg-cream-100 rounded-l-lg transition-colors"
                       aria-label="Previous day"
                     >
-                      <ChevronLeft className="w-4 h-4 text-forest-600" />
+                      <ChevronLeft className="w-5 h-5 text-forest-600" />
                     </button>
                     <button
                       onClick={() => setShowCalendar(!showCalendar)}
-                      className="flex items-center gap-2 px-3 py-2 min-h-11 text-sm font-medium text-forest-600 hover:bg-forest-100 transition-colors"
+                      className="flex items-center gap-2 px-4 py-2 min-h-11 text-sm font-medium text-forest-600 hover:bg-cream-100 transition-colors"
                     >
                       <Calendar className="w-4 h-4" />
-                      <span>{format(selectedDate, 'MMM dd')}</span>
+                      <span className="min-w-[4.5rem]">{format(selectedDate, 'MMM dd')}</span>
                     </button>
                     <button
                       onClick={handleNextDay}
                       disabled={isToday}
-                      className="p-2 hover:bg-forest-100 rounded-r-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="p-2.5 hover:bg-cream-100 rounded-r-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       aria-label="Next day"
                     >
-                      <ChevronRight className="w-4 h-4 text-forest-600" />
+                      <ChevronRight className="w-5 h-5 text-forest-600" />
                     </button>
                   </div>
                   {showCalendar && (
