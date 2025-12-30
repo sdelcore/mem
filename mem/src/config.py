@@ -1,7 +1,7 @@
 """Configuration management for Mem."""
 
+import os
 from pathlib import Path
-from typing import Optional
 
 import yaml
 from pydantic import BaseModel
@@ -32,28 +32,17 @@ class CaptureConfig(BaseModel):
     audio: CaptureAudioConfig = CaptureAudioConfig()
 
 
-class WhisperConfig(BaseModel):
-    """Whisper transcription configuration (legacy, use STTDConfig instead)."""
-
-    model: str = "base"
-    language: str = "auto"
-    fallback_language: str = "en"
-    device: str = "cpu"
-    detect_non_speech: bool = True
-    no_speech_threshold: float = 0.6
-    logprob_threshold: float = -1.0
-
-
 class STTDConfig(BaseModel):
-    """STTD (speech-to-text with diarization) configuration."""
+    """STTD HTTP server configuration."""
 
-    model: str = "large-v3"  # Whisper model size
-    device: str = "cuda"  # cuda or cpu
-    compute_type: str = "float16"  # float16 for GPU, int8 for CPU
-    profiles_path: str = "data/voice_profiles"  # Storage for voice profiles
-    enable_diarization: bool = True  # Enable speaker identification
-    speaker_identification: bool = True  # Identify registered speakers
-    min_speaker_confidence: float = 0.7  # Threshold for speaker ID
+    host: str = "127.0.0.1"  # STTD server host (can be remote IP)
+    port: int = 8765  # STTD server port
+    timeout: float = 300.0  # Request timeout in seconds (transcription can be slow)
+
+    @property
+    def base_url(self) -> str:
+        """Get the base URL for the STTD server."""
+        return f"http://{self.host}:{self.port}"
 
 
 class DatabaseConfig(BaseModel):
@@ -76,6 +65,16 @@ class APIConfig(BaseModel):
     port: int = 8000
     max_upload_size: int = 5368709120  # 5GB
     default_time_range_days: int = 1
+
+
+class RateLimitConfig(BaseModel):
+    """Rate limiting configuration."""
+
+    enabled: bool = True
+    capture_per_minute: int = 5
+    search_per_minute: int = 60
+    stream_create_per_minute: int = 10
+    default_per_minute: int = 100
 
 
 class StreamingRTMPConfig(BaseModel):
@@ -122,15 +121,15 @@ class Config(BaseModel):
 
     database: DatabaseConfig = DatabaseConfig()
     capture: CaptureConfig = CaptureConfig()
-    whisper: WhisperConfig = WhisperConfig()  # Legacy, use sttd
     sttd: STTDConfig = STTDConfig()
     files: FilesConfig = FilesConfig()
     api: APIConfig = APIConfig()
+    rate_limiting: RateLimitConfig = RateLimitConfig()
     streaming: StreamingConfig = StreamingConfig()
     logging: LoggingConfig = LoggingConfig()
 
 
-def load_config(path: Optional[Path] = None) -> Config:
+def load_config(path: Path | None = None) -> Config:
     """
     Load configuration from YAML file or use defaults.
 
@@ -141,21 +140,26 @@ def load_config(path: Optional[Path] = None) -> Config:
         Config object with loaded or default settings.
     """
     if path is None:
-        # Look for config.yaml in current directory or parent directories
-        current = Path.cwd()
-        config_paths = [
-            current / "config.yaml",
-            current.parent / "config.yaml",
-            Path(__file__).parent.parent / "config.yaml",
-        ]
-
-        for config_path in config_paths:
-            if config_path.exists():
-                path = config_path
-                break
+        # Check MEM_CONFIG_PATH environment variable first
+        env_config_path = os.environ.get("MEM_CONFIG_PATH")
+        if env_config_path:
+            path = Path(env_config_path)
         else:
-            # No config file found, use defaults
-            return Config()
+            # Look for config.yaml in current directory or parent directories
+            current = Path.cwd()
+            config_paths = [
+                current / "config.yaml",
+                current.parent / "config.yaml",
+                Path(__file__).parent.parent / "config.yaml",
+            ]
+
+            for config_path in config_paths:
+                if config_path.exists():
+                    path = config_path
+                    break
+            else:
+                # No config file found, use defaults
+                return Config()
 
     if path and path.exists():
         with open(path) as f:
@@ -169,10 +173,10 @@ def load_config(path: Optional[Path] = None) -> Config:
                 frame=CaptureFrameConfig(**data.get("capture", {}).get("frame", {})),
                 audio=CaptureAudioConfig(**data.get("capture", {}).get("audio", {})),
             ),
-            whisper=WhisperConfig(**data.get("whisper", {})),
             sttd=STTDConfig(**data.get("sttd", {})),
             files=FilesConfig(**data.get("files", {})),
             api=APIConfig(**data.get("api", {})),
+            rate_limiting=RateLimitConfig(**data.get("rate_limiting", {})),
             streaming=StreamingConfig(
                 rtmp=StreamingRTMPConfig(**streaming_data.get("rtmp", {})),
                 capture=StreamingCaptureConfig(**streaming_data.get("capture", {})),

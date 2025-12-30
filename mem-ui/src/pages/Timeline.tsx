@@ -16,7 +16,6 @@ function Timeline() {
   const [selectedTime, setSelectedTime] = useState<Date | null>(null)
   const [selectedRange, setSelectedRange] = useState<{ start: Date; end: Date } | null>(null)
   const [selectedDate, setSelectedDate] = useState<Date>(new Date())
-  const [viewMode, setViewMode] = useState<'24h' | '12h' | '6h'>('12h')
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true)
   const [timeOffset, setTimeOffset] = useState(0)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
@@ -34,50 +33,19 @@ function Timeline() {
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // Calculate time range based on selected date, view mode, and offset
+  // Calculate time range based on selected date and offset (always 24h view)
   const { startTime, endTime } = useMemo(() => {
     const start = new Date(selectedDate)
     const end = new Date(selectedDate)
 
-    if (viewMode === '24h') {
-      // Show full day with day offset
-      start.setHours(0, 0, 0, 0)
-      start.setDate(start.getDate() + timeOffset)
-      end.setHours(23, 59, 59, 999)
-      end.setDate(end.getDate() + timeOffset)
-    } else if (viewMode === '12h') {
-      // Show 12-hour periods (AM/PM)
-      // timeOffset 0 = 00:00-11:59 (AM)
-      // timeOffset 1 = 12:00-23:59 (PM)
-      // timeOffset -1 = previous day PM
-      // timeOffset 2 = next day AM
-      const dayOffset = Math.floor(timeOffset / 2)
-      const isPM = timeOffset % 2 !== 0
-
-      start.setDate(start.getDate() + dayOffset)
-      start.setHours(isPM ? 12 : 0, 0, 0, 0)
-
-      end.setDate(end.getDate() + dayOffset)
-      end.setHours(isPM ? 23 : 11, 59, 59, 999)
-    } else if (viewMode === '6h') {
-      // Show 6-hour quarters of the day
-      // timeOffset 0 = 00:00-05:59
-      // timeOffset 1 = 06:00-11:59
-      // timeOffset 2 = 12:00-17:59
-      // timeOffset 3 = 18:00-23:59
-      const dayOffset = Math.floor(timeOffset / 4)
-      const quarter = timeOffset % 4
-      const startHour = quarter * 6
-
-      start.setDate(start.getDate() + dayOffset)
-      start.setHours(startHour, 0, 0, 0)
-
-      end.setDate(end.getDate() + dayOffset)
-      end.setHours(startHour + 5, 59, 59, 999)
-    }
+    // Show full day with day offset
+    start.setHours(0, 0, 0, 0)
+    start.setDate(start.getDate() + timeOffset)
+    end.setHours(23, 59, 59, 999)
+    end.setDate(end.getDate() + timeOffset)
 
     return { startTime: start, endTime: end }
-  }, [selectedDate, viewMode, timeOffset])
+  }, [selectedDate, timeOffset])
 
   const { data: timelineData, isLoading, error, refetch } = useTimeline(startTime, endTime)
 
@@ -107,12 +75,6 @@ function Timeline() {
     // Clear selections and reset offset when changing date
     setSelectedTime(null)
     setSelectedRange(null)
-    setTimeOffset(0)
-  }
-
-  const handleViewModeChange = (mode: '24h' | '12h' | '6h') => {
-    setViewMode(mode)
-    // Reset offset when changing view mode
     setTimeOffset(0)
   }
 
@@ -160,33 +122,6 @@ function Timeline() {
 
               {/* Desktop controls */}
               <div className="hidden md:flex items-center gap-4">
-                {/* View Mode Toggle */}
-                <div className="flex items-center gap-1 bg-forest-100 rounded-lg p-1">
-                  <button
-                    onClick={() => handleViewModeChange('6h')}
-                    className={`px-3 py-2 min-h-9 text-xs font-medium rounded-md transition-colors ${
-                      viewMode === '6h' ? 'bg-forest-500 text-cream-50' : 'text-forest-600 hover:bg-forest-200'
-                    }`}
-                  >
-                    6h
-                  </button>
-                  <button
-                    onClick={() => handleViewModeChange('12h')}
-                    className={`px-3 py-2 min-h-9 text-xs font-medium rounded-md transition-colors ${
-                      viewMode === '12h' ? 'bg-forest-500 text-cream-50' : 'text-forest-600 hover:bg-forest-200'
-                    }`}
-                  >
-                    12h
-                  </button>
-                  <button
-                    onClick={() => handleViewModeChange('24h')}
-                    className={`px-3 py-2 min-h-9 text-xs font-medium rounded-md transition-colors ${
-                      viewMode === '24h' ? 'bg-forest-500 text-cream-50' : 'text-forest-600 hover:bg-forest-200'
-                    }`}
-                  >
-                    24h
-                  </button>
-                </div>
                 {/* Today Button */}
                 <button
                   onClick={() => {
@@ -225,34 +160,6 @@ function Timeline() {
           {isMobileMenuOpen && (
             <div className="md:hidden absolute top-14 left-0 right-0 bg-cream-100/95 backdrop-blur-lg border-b border-sage-200/50 shadow-lg z-50 animate-slide-down">
               <div className="px-4 py-4 space-y-4">
-                {/* View Mode Toggle - full width on mobile */}
-                <div className="flex items-center gap-1 bg-forest-100 rounded-lg p-1">
-                  <button
-                    onClick={() => { handleViewModeChange('6h'); setIsMobileMenuOpen(false); }}
-                    className={`flex-1 px-3 py-3 min-h-11 text-sm font-medium rounded-md transition-colors ${
-                      viewMode === '6h' ? 'bg-forest-500 text-cream-50' : 'text-forest-600 hover:bg-forest-200'
-                    }`}
-                  >
-                    6h
-                  </button>
-                  <button
-                    onClick={() => { handleViewModeChange('12h'); setIsMobileMenuOpen(false); }}
-                    className={`flex-1 px-3 py-3 min-h-11 text-sm font-medium rounded-md transition-colors ${
-                      viewMode === '12h' ? 'bg-forest-500 text-cream-50' : 'text-forest-600 hover:bg-forest-200'
-                    }`}
-                  >
-                    12h
-                  </button>
-                  <button
-                    onClick={() => { handleViewModeChange('24h'); setIsMobileMenuOpen(false); }}
-                    className={`flex-1 px-3 py-3 min-h-11 text-sm font-medium rounded-md transition-colors ${
-                      viewMode === '24h' ? 'bg-forest-500 text-cream-50' : 'text-forest-600 hover:bg-forest-200'
-                    }`}
-                  >
-                    24h
-                  </button>
-                </div>
-
                 {/* Today Button - full width */}
                 <button
                   onClick={() => {

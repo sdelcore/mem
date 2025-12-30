@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { format } from 'date-fns'
-import { ChevronRight, Image, Tag, Clock, X, Maximize, ZoomIn, ZoomOut, RotateCcw, Plus } from 'lucide-react'
+import { ChevronRight, Tag, Clock, X, Maximize, ZoomIn, ZoomOut, RotateCcw, Plus } from 'lucide-react'
 import AddContentModal from './AddContentModal'
+import SpeakerEditor from './SpeakerEditor'
 
 interface Annotation {
   annotation_id?: number
@@ -21,6 +22,7 @@ interface ContentItem {
   source_id?: number
   source_location?: string
   source_type?: string
+  transcription_id?: number
   frame?: {
     url: string
     hash?: string
@@ -86,6 +88,7 @@ interface RawContentData {
   source_id?: number
   source_location?: string
   source_type?: string
+  transcription_id?: number
   frame?: { url: string; hash?: string; source_id?: number }
   transcript?: string
   speaker_name?: string
@@ -140,6 +143,7 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
           source_id: item.source_id,
           source_location: item.source_location,
           source_type: item.source_type,
+          transcription_id: item.transcription_id,
           frame: item.frame,
           transcript: item.transcript,
           speaker_name: item.speaker_name,
@@ -330,15 +334,15 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
             >
               <div className="space-y-3 p-3 sm:p-4 bg-cream-50 border-t border-cream-200">
                 {chunk.items.map((item) => (
-                  <div key={item.id} className="flex gap-3 sm:gap-4 p-3 bg-white rounded-lg border border-cream-200">
+                  <div key={item.id} className={`flex gap-3 sm:gap-4 p-3 bg-white rounded-lg border border-cream-200 ${!item.frame ? 'border-l-4 border-l-sage-300' : ''}`}>
                     {/* Timestamp */}
                     <div className="flex-shrink-0 text-xs text-sage-400 w-14 sm:w-16 pt-1">
                       {format(item.timestamp, 'HH:mm:ss')}
                     </div>
 
-                    {/* Frame (left side) */}
-                    <div className="flex-shrink-0 w-24 sm:w-32 md:w-48">
-                      {item.frame ? (
+                    {/* Frame (left side) - only render if frame exists */}
+                    {item.frame && (
+                      <div className="flex-shrink-0 w-24 sm:w-32 md:w-48">
                         <div className="relative group">
                           <img
                             src={item.frame.url}
@@ -352,21 +356,25 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
                             </div>
                           </div>
                         </div>
-                      ) : (
-                        <div className="w-full h-16 sm:h-20 bg-cream-100 rounded flex items-center justify-center border border-cream-200">
-                          <Image className="w-5 h-5 text-cream-300" />
-                        </div>
-                      )}
-                    </div>
+                      </div>
+                    )}
 
                     {/* Transcript and annotations (right side) */}
                     <div className="flex-1 space-y-2 min-w-0">
                       {item.transcript && (
                         <p className="text-sm text-forest-700 break-words">
-                          {item.speaker_name && (
-                            <span className="font-semibold text-sage-600">[{item.speaker_name}]: </span>
+                          {item.transcription_id ? (
+                            <SpeakerEditor
+                              transcriptionId={item.transcription_id}
+                              currentSpeaker={item.speaker_name || null}
+                              speakerConfidence={item.speaker_confidence}
+                            />
+                          ) : (
+                            <span className="font-semibold text-sage-600">
+                              [{item.speaker_name || 'Unknown'}]
+                            </span>
                           )}
-                          {item.transcript}
+                          {': '}{item.transcript}
                         </p>
                       )}
 

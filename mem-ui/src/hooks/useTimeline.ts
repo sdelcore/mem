@@ -9,6 +9,7 @@ interface TimelineData {
   source_filename?: string
   source_location?: string
   source_device_id?: string
+  transcription_id?: number
   frame?: {
     url: string
     hash?: string
@@ -53,6 +54,7 @@ export const useTimeline = (
       source_filename: entry.source_filename,
       source_location: entry.source_location,
       source_device_id: entry.source_device_id,
+      transcription_id: entry.transcript?.transcription_id,
       frame: entry.frame ? {
         url: `${API_BASE_URL}/api/search?type=frame&frame_id=${entry.frame.frame_id}`,
         hash: entry.frame.perceptual_hash,

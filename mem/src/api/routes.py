@@ -6,17 +6,32 @@ import re
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
-from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Body,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
+from src.api.exceptions import (
+    ResourceNotFoundError,
+    StreamError,
+    ValidationError,
+)
 from src.api.models import (
     AnnotationData,
     AnnotationListResponse,
     AnnotationResponse,
     BatchAnnotationRequest,
-    CaptureRequest,
     CaptureResponse,
     CreateAnnotationRequest,
     CreateStreamRequest,
@@ -42,7 +57,6 @@ from src.api.services import (
     AnnotationService,
     CaptureService,
     SearchService,
-    VoiceNoteService,
     get_rtmp_server,
 )
 from src.api.settings import SettingsService
@@ -53,6 +67,9 @@ logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter()
+
+# Create rate limiter
+limiter = Limiter(key_func=get_remote_address)
 
 # Initialize services
 capture_service = CaptureService()
@@ -85,13 +102,16 @@ def _build_stream_response(session: StreamSession) -> StreamSessionResponse:
 
 
 @router.post("/capture", response_model=CaptureResponse)
+@limiter.limit("5/minute")
 async def capture_video(
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
 ):
     """Upload and process a video file for frame and transcript extraction.
 
     Args:
+        request: FastAPI request object (required for rate limiting)
         file: Uploaded video file
         background_tasks: FastAPI background tasks
 
@@ -104,18 +124,15 @@ async def capture_video(
         # Check filename format: YYYY-MM-DD_HH-MM-SS.(mp4|mkv)
         pattern = r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.(mp4|mkv)$"
         if not re.match(pattern, filename):
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid filename format. Expected: YYYY-MM-DD_HH-MM-SS.mp4 or .mkv",
+            raise ValidationError(
+                "Invalid filename format. Expected: YYYY-MM-DD_HH-MM-SS.mp4 or .mkv"
             )
 
         # Check file size (5GB max)
         max_size = 5 * 1024 * 1024 * 1024  # 5GB in bytes
         content = await file.read()
         if len(content) > max_size:
-            raise HTTPException(
-                status_code=413, detail="File size exceeds maximum allowed size of 5GB"
-            )
+            raise ValidationError("File size exceeds maximum allowed size of 5GB")
 
         # Reset file pointer after reading
         await file.seek(0)
@@ -149,19 +166,21 @@ async def capture_video(
 
 
 @router.get("/search")
+@limiter.limit("60/minute")
 async def search(
+    request: Request,
     type: str = Query(..., description="Search type: timeline, frame, transcript, all"),
-    start: Optional[datetime] = Query(
+    start: datetime | None = Query(
         None, description="Start time for timeline search"
     ),
-    end: Optional[datetime] = Query(None, description="End time for timeline search"),
-    source_id: Optional[int] = Query(None, description="Filter by source ID"),
-    q: Optional[str] = Query(None, description="Query text for transcript search"),
-    frame_id: Optional[int] = Query(None, description="Frame ID for direct access"),
+    end: datetime | None = Query(None, description="End time for timeline search"),
+    source_id: int | None = Query(None, description="Filter by source ID"),
+    q: str | None = Query(None, description="Query text for transcript search"),
+    frame_id: int | None = Query(None, description="Frame ID for direct access"),
     limit: int = Query(100, description="Maximum results to return"),
     offset: int = Query(0, description="Pagination offset"),
     format: str = Query("jpeg", description="Output format for frames"),
-    size: Optional[str] = Query(None, description="Size for frame output"),
+    size: str | None = Query(None, description="Size for frame output"),
 ):
     """Universal search endpoint for all data retrieval.
 
@@ -175,9 +194,7 @@ async def search(
         # Handle frame retrieval
         if type == "frame":
             if not frame_id:
-                raise HTTPException(
-                    status_code=400, detail="frame_id required for frame type"
-                )
+                raise ValidationError("frame_id required for frame type")
 
             # Get frame image data
             image_bytes, content_type = search_service.get_frame(frame_id, format, size)
@@ -238,10 +255,7 @@ async def search(
         # Handle transcript search
         elif type == "transcript":
             if not q:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Query text 'q' required for transcript search",
-                )
+                raise ValidationError("Query text 'q' required for transcript search")
 
             result = search_service.search_transcripts(q, source_id, limit, offset)
 
@@ -284,17 +298,18 @@ async def search(
             )
 
         else:
-            raise HTTPException(status_code=400, detail=f"Invalid search type: {type}")
+            raise ValidationError(f"Invalid search type: {type}")
 
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise ResourceNotFoundError("Resource", str(e))
     except Exception as e:
         logger.error(f"Search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/status", response_model=StatusResponse)
-async def get_status():
+@limiter.limit("100/minute")
+async def get_status(request: Request):
     """Get system status and statistics.
 
     Returns:
@@ -321,7 +336,7 @@ async def get_job_status(job_id: str):
     """
     job = capture_service.get_job_status(job_id)
     if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        raise ResourceNotFoundError("Job", job_id)
 
     return job
 
@@ -338,7 +353,7 @@ async def create_annotation(request: CreateAnnotationRequest):
         Created annotation
     """
     try:
-        annotation_id = annotation_service.create_annotation(
+        _ = annotation_service.create_annotation(
             source_id=request.source_id,
             start_timestamp=request.start_timestamp,
             end_timestamp=request.end_timestamp,
@@ -356,9 +371,7 @@ async def create_annotation(request: CreateAnnotationRequest):
             ann = result["annotations"][0]
             return AnnotationResponse(**ann)
         else:
-            raise HTTPException(
-                status_code=500, detail="Failed to retrieve created annotation"
-            )
+            raise ResourceNotFoundError("Annotation", "created annotation")
 
     except Exception as e:
         logger.error(f"Create annotation failed: {e}")
@@ -387,9 +400,7 @@ async def update_annotation(annotation_id: int, request: UpdateAnnotationRequest
 
         success = annotation_service.update_annotation(annotation_id, updates)
         if not success:
-            raise HTTPException(
-                status_code=404, detail=f"Annotation {annotation_id} not found"
-            )
+            raise ResourceNotFoundError("Annotation", annotation_id)
 
         # Fetch and return the updated annotation
         result = annotation_service.db.connection.execute(
@@ -397,7 +408,7 @@ async def update_annotation(annotation_id: int, request: UpdateAnnotationRequest
             [annotation_id]
         ).fetchone()
         if not result:
-            raise HTTPException(status_code=404, detail="Annotation not found after update")
+            raise ResourceNotFoundError("Annotation", annotation_id)
 
         return AnnotationResponse(
             annotation_id=result[0],
@@ -412,7 +423,7 @@ async def update_annotation(annotation_id: int, request: UpdateAnnotationRequest
             updated_at=result[9],
         )
 
-    except HTTPException:
+    except (ResourceNotFoundError, ValidationError):
         raise
     except Exception as e:
         logger.error(f"Update annotation failed: {e}")
@@ -432,13 +443,11 @@ async def delete_annotation(annotation_id: int):
     try:
         success = annotation_service.delete_annotation(annotation_id)
         if not success:
-            raise HTTPException(
-                status_code=404, detail=f"Annotation {annotation_id} not found"
-            )
+            raise ResourceNotFoundError("Annotation", annotation_id)
 
         return {"message": f"Annotation {annotation_id} deleted successfully"}
 
-    except HTTPException:
+    except (ResourceNotFoundError, ValidationError):
         raise
     except Exception as e:
         logger.error(f"Delete annotation failed: {e}")
@@ -447,10 +456,10 @@ async def delete_annotation(annotation_id: int):
 
 @router.get("/annotations", response_model=AnnotationListResponse)
 async def get_annotations(
-    source_id: Optional[int] = Query(None, description="Filter by source ID"),
-    start: Optional[datetime] = Query(None, description="Start timestamp"),
-    end: Optional[datetime] = Query(None, description="End timestamp"),
-    type: Optional[str] = Query(None, description="Filter by annotation type"),
+    source_id: int | None = Query(None, description="Filter by source ID"),
+    start: datetime | None = Query(None, description="Start timestamp"),
+    end: datetime | None = Query(None, description="End timestamp"),
+    type: str | None = Query(None, description="Filter by annotation type"),
     limit: int = Query(100, description="Maximum results"),
     offset: int = Query(0, description="Pagination offset"),
 ):
@@ -578,21 +587,23 @@ async def create_quick_annotation(
 
 # Stream endpoints
 @router.post("/streams/create", response_model=StreamSessionResponse)
-async def create_stream(request: CreateStreamRequest):
+@limiter.limit("10/minute")
+async def create_stream(request: Request, request_body: CreateStreamRequest):
     """Create a new stream session for OBS Studio."""
     try:
         rtmp_server = get_rtmp_server()
-        session = rtmp_server.create_session(stream_name=request.name)
+        session = rtmp_server.create_session(stream_name=request_body.name)
         return _build_stream_response(session)
     except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise StreamError(str(e))
     except Exception as e:
         logger.error(f"Create stream failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/streams", response_model=StreamListResponse)
-async def list_streams():
+@limiter.limit("100/minute")
+async def list_streams(request: Request):
     """List all stream sessions."""
     try:
         rtmp_server = get_rtmp_server()
@@ -614,7 +625,7 @@ async def get_stream(stream_key: str):
     rtmp_server = get_rtmp_server()
     session = rtmp_server.get_session(stream_key)
     if not session:
-        raise HTTPException(status_code=404, detail=f"Stream {stream_key} not found")
+        raise ResourceNotFoundError("Stream", stream_key)
     return _build_stream_response(session)
 
 
@@ -623,7 +634,7 @@ async def start_stream(stream_key: str):
     """Start receiving stream from OBS Studio."""
     rtmp_server = get_rtmp_server()
     if not rtmp_server.start_stream(stream_key):
-        raise HTTPException(status_code=400, detail="Failed to start stream")
+        raise StreamError("Failed to start stream")
     return {"message": f"Stream {stream_key} started successfully"}
 
 
@@ -632,7 +643,7 @@ async def stop_stream(stream_key: str):
     """Stop an active stream."""
     rtmp_server = get_rtmp_server()
     if not rtmp_server.stop_stream(stream_key):
-        raise HTTPException(status_code=404, detail=f"Stream {stream_key} not found")
+        raise ResourceNotFoundError("Stream", stream_key)
     return {"message": f"Stream {stream_key} stopped successfully"}
 
 
@@ -641,7 +652,7 @@ async def delete_stream(stream_key: str):
     """Delete a stream session."""
     rtmp_server = get_rtmp_server()
     if not rtmp_server.delete_session(stream_key):
-        raise HTTPException(status_code=404, detail=f"Stream {stream_key} not found")
+        raise ResourceNotFoundError("Stream", stream_key)
     return {"message": f"Stream {stream_key} deleted successfully"}
 
 
@@ -676,9 +687,9 @@ async def get_voice_profile(profile_id: int):
         service = get_voice_profile_service()
         profile = service.get_profile(profile_id)
         if not profile:
-            raise HTTPException(status_code=404, detail="Profile not found")
+            raise ResourceNotFoundError("Voice profile", profile_id)
         return VoiceProfileResponse.from_model(profile)
-    except HTTPException:
+    except (ResourceNotFoundError, ValidationError):
         raise
     except Exception as e:
         logger.error(f"Failed to get voice profile: {e}")
@@ -688,7 +699,7 @@ async def get_voice_profile(profile_id: int):
 @router.post("/voice-profiles", response_model=VoiceProfileResponse)
 async def create_voice_profile(
     name: str = Form(..., description="Unique identifier for the profile"),
-    display_name: Optional[str] = Form(None, description="Human-readable name"),
+    display_name: str | None = Form(None, description="Human-readable name"),
     file: UploadFile = File(..., description="Audio file for voice registration"),
 ):
     """Create a new voice profile from audio file upload.
@@ -701,9 +712,8 @@ async def create_voice_profile(
         allowed_extensions = {".wav", ".mp3", ".m4a", ".webm", ".ogg"}
         file_ext = Path(file.filename).suffix.lower() if file.filename else ""
         if file_ext not in allowed_extensions:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid file type. Supported: {', '.join(allowed_extensions)}",
+            raise ValidationError(
+                f"Invalid file type. Supported: {', '.join(allowed_extensions)}"
             )
 
         # Read audio data
@@ -711,9 +721,8 @@ async def create_voice_profile(
 
         # Validate minimum file size (roughly 1 second of audio)
         if len(audio_data) < 10000:  # ~10KB minimum
-            raise HTTPException(
-                status_code=400,
-                detail="Audio file too short. Please provide at least 5 seconds of speech.",
+            raise ValidationError(
+                "Audio file too short. Please provide at least 5 seconds of speech."
             )
 
         # Create profile
@@ -727,8 +736,8 @@ async def create_voice_profile(
         return VoiceProfileResponse.from_model(profile)
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:
+        raise ValidationError(str(e))
+    except (ValidationError, ResourceNotFoundError):
         raise
     except Exception as e:
         logger.error(f"Failed to create voice profile: {e}")
@@ -741,9 +750,9 @@ async def delete_voice_profile(profile_id: int):
     try:
         service = get_voice_profile_service()
         if not service.delete_profile(profile_id):
-            raise HTTPException(status_code=404, detail="Profile not found")
+            raise ResourceNotFoundError("Voice profile", profile_id)
         return {"message": f"Profile {profile_id} deleted successfully"}
-    except HTTPException:
+    except (ResourceNotFoundError, ValidationError):
         raise
     except Exception as e:
         logger.error(f"Failed to delete voice profile: {e}")
@@ -751,8 +760,147 @@ async def delete_voice_profile(profile_id: int):
 
 
 # ============================================================================
+# Transcription Speaker Editing
+# ============================================================================
+
+
+@router.patch("/transcriptions/{transcription_id}/speaker")
+async def update_transcription_speaker(
+    transcription_id: int,
+    speaker_name: str = Body(..., embed=True),
+    speaker_id: int | None = Body(None, embed=True),
+):
+    """Update the speaker label for a transcription.
+
+    Allows manual override of speaker identification for a single transcription.
+    Can use either free-text entry or select from registered voice profiles.
+
+    Args:
+        transcription_id: ID of transcription to update
+        speaker_name: New speaker name (free text or from profile)
+        speaker_id: Optional voice profile ID (if selecting from registered profiles)
+
+    Returns:
+        Updated speaker information
+    """
+    from src.config import config
+    from src.storage.db import Database
+
+    try:
+        db = Database(db_path=config.database.path)
+        db.connect()
+
+        try:
+            # Verify transcription exists
+            result = db.connection.execute(
+                "SELECT 1 FROM transcriptions WHERE transcription_id = ?",
+                [transcription_id],
+            ).fetchone()
+
+            if not result:
+                raise ResourceNotFoundError("Transcription", transcription_id)
+
+            # Validate speaker_id if provided
+            if speaker_id is not None:
+                profile = db.get_speaker_profile(speaker_id)
+                if not profile:
+                    raise ResourceNotFoundError("Voice profile", speaker_id)
+
+            # Update the transcription
+            success = db.update_transcription_speaker(
+                transcription_id=transcription_id,
+                speaker_name=speaker_name,
+                speaker_id=speaker_id,
+                speaker_confidence=1.0,  # Manual override = 100% confidence
+            )
+
+            if not success:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to update transcription speaker",
+                )
+
+            return {
+                "transcription_id": transcription_id,
+                "speaker_name": speaker_name,
+                "speaker_id": speaker_id,
+                "speaker_confidence": 1.0,
+                "message": "Speaker updated successfully",
+            }
+
+        finally:
+            db.disconnect()
+
+    except (ResourceNotFoundError, ValidationError):
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update transcription speaker: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
 # Voice Notes Endpoints
 # ============================================================================
+
+
+@router.post("/transcribe")
+async def transcribe_audio(
+    file: UploadFile = File(..., description="Audio file to transcribe"),
+):
+    """Transcribe audio file without saving to database.
+
+    Returns transcription text only. Used for voice-to-text input
+    in the annotation modal.
+
+    Supported audio formats: wav, mp3, m4a, webm, ogg
+    """
+    import tempfile
+
+    from src.api.services import UserRecordingService
+
+    try:
+        # Validate file type
+        allowed_extensions = {".wav", ".mp3", ".m4a", ".webm", ".ogg"}
+        file_ext = Path(file.filename).suffix.lower() if file.filename else ".webm"
+        if file_ext not in allowed_extensions:
+            raise ValidationError(
+                f"Invalid file type. Supported: {', '.join(allowed_extensions)}"
+            )
+
+        # Read audio data
+        audio_data = await file.read()
+
+        # Validate minimum file size
+        if len(audio_data) < 1000:  # ~1KB minimum
+            raise ValidationError("Audio file too short.")
+
+        # Save to temp file for transcription
+        with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as temp_file:
+            temp_file.write(audio_data)
+            temp_path = Path(temp_file.name)
+
+        try:
+            # Transcribe without saving
+            service = UserRecordingService()
+            result = service.transcribe_audio_only(temp_path)
+
+            return {
+                "status": "success",
+                "text": result["text"],
+                "language": result["language"],
+                "duration": result["duration"],
+            }
+
+        finally:
+            # Clean up temp file
+            if temp_path.exists():
+                temp_path.unlink()
+
+    except (ValidationError, ResourceNotFoundError):
+        raise
+    except Exception as e:
+        logger.error(f"Failed to transcribe audio: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/voice-notes")
@@ -768,6 +916,7 @@ async def create_voice_note(
     Supported audio formats: wav, mp3, m4a, webm, ogg
     """
     import tempfile
+
     from src.api.services import UserRecordingService
 
     try:
@@ -775,9 +924,8 @@ async def create_voice_note(
         allowed_extensions = {".wav", ".mp3", ".m4a", ".webm", ".ogg"}
         file_ext = Path(file.filename).suffix.lower() if file.filename else ".webm"
         if file_ext not in allowed_extensions:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid file type. Supported: {', '.join(allowed_extensions)}",
+            raise ValidationError(
+                f"Invalid file type. Supported: {', '.join(allowed_extensions)}"
             )
 
         # Read audio data
@@ -785,10 +933,7 @@ async def create_voice_note(
 
         # Validate minimum file size
         if len(audio_data) < 1000:  # ~1KB minimum
-            raise HTTPException(
-                status_code=400,
-                detail="Audio file too short.",
-            )
+            raise ValidationError("Audio file too short.")
 
         # Save to temp file for transcription
         with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as temp_file:
@@ -815,7 +960,7 @@ async def create_voice_note(
             if temp_path.exists():
                 temp_path.unlink()
 
-    except HTTPException:
+    except (ValidationError, ResourceNotFoundError):
         raise
     except Exception as e:
         logger.error(f"Failed to create voice note: {e}")

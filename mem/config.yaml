@@ -4,13 +4,9 @@ database:
   path: /data/db/mem.duckdb
 
 sttd:
-  model: base
-  device: cuda
-  compute_type: float16
-  profiles_path: /data/db/voice_profiles
-  enable_diarization: true
-  speaker_identification: true
-  min_speaker_confidence: 0.7
+  host: "mem-sttd"   # STTD server host (use 127.0.0.1 for local, mem-sttd for docker)
+  port: 8765         # STTD server port
+  timeout: 300.0     # Request timeout in seconds
 
 capture:
   frame:
@@ -21,17 +17,6 @@ capture:
   audio:
     chunk_duration_seconds: 300
     sample_rate: 16000
-
-whisper:
-  model: base
-  language: auto
-  fallback_language: en
-  device: cuda  # cuda for GPU, cpu for CPU-only
-  compute_type: float16  # float16 for GPU, int8 for CPU (faster-whisper specific)
-  # Transcription quality settings
-  no_speech_threshold: 0.6
-  logprob_threshold: -1.0
-  detect_non_speech: true
 
 files:
   filename_format: YYYY-MM-DD_HH-MM-SS

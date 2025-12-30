@@ -1,26 +1,26 @@
-# Multi-stage Dockerfile for Mem backend (CPU-only variant)
-# For systems without NVIDIA GPU - uses int8 quantization for efficiency
+# Dockerfile for Mem backend (CPU-only)
+# Uses STTD HTTP API for transcription - no local Whisper needed
 
 # Stage 1: Builder
-FROM python:3.9-slim-bookworm AS builder
+FROM python:3.11-slim AS builder
 
-# Prevent interactive prompts during build
-ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 
-# Install system dependencies
+# Install build dependencies
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     git \
     curl \
-    wget \
-    build-essential \
+    pkg-config \
+    libcairo2-dev \
+    libgirepository1.0-dev \
+    gir1.2-glib-2.0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv for fast Python package management
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:$PATH"
+ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /app
 
@@ -33,20 +33,18 @@ RUN uv venv && \
     uv pip install --upgrade pip && \
     uv pip install -e .
 
-# Pre-download Faster-Whisper model (CPU optimized with int8 quantization)
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8')"
-
 # Stage 2: Runtime
-FROM python:3.9-slim-bookworm
+FROM python:3.11-slim
 
-# Environment setup
-ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# Install runtime dependencies only
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libgomp1 \
+    libcairo2 \
+    libgirepository-1.0-1 \
+    gir1.2-glib-2.0 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -59,7 +57,6 @@ WORKDIR /app
 
 # Copy Python environment from builder
 COPY --from=builder --chown=memuser:memuser /app/.venv /app/.venv
-COPY --from=builder --chown=memuser:memuser /root/.cache/huggingface /home/memuser/.cache/huggingface
 
 # Copy application code
 COPY --chown=memuser:memuser src/ ./src/
@@ -69,15 +66,11 @@ COPY --chown=memuser:memuser config.yaml ./config.yaml
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH="/app:$PYTHONPATH"
 
-# CPU-specific Whisper settings
-ENV WHISPER_DEVICE=cpu
-ENV WHISPER_COMPUTE_TYPE=int8
-
 # Switch to non-root user
 USER memuser
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8000/api/status || exit 1
 
 # Expose API port

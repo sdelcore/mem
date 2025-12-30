@@ -127,6 +127,7 @@
             at-spi2-core
             gtk3
             glib
+            gobject-introspection
             fontconfig
             freetype
           ];

@@ -91,60 +91,88 @@ class SearchService:
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
-        """Search timeline entries within a time range."""
-        # Get timeline entries from database with source information
-        query = """
+        """Search timeline entries within a time range.
+
+        Combines frame entries from timeline table with transcriptions queried
+        directly. Transcriptions auto-appear without needing timeline entries.
+        """
+        # Frame entries from timeline table
+        frame_query = """
         SELECT
             t.entry_id,
             t.source_id,
             t.timestamp,
             t.frame_id,
-            t.transcription_id,
+            NULL as transcription_id,
             t.similarity_score,
             f.perceptual_hash,
             f.metadata as frame_metadata,
+            NULL as transcript_text,
+            NULL as confidence,
+            NULL as language,
+            NULL as trans_start_timestamp,
+            NULL as trans_end_timestamp,
+            NULL as speaker_name,
+            NULL as speaker_confidence,
+            s.source_type,
+            s.filename,
+            s.location,
+            s.device_id,
+            s.metadata as source_metadata,
+            'frame' as entry_type
+        FROM timeline t
+        LEFT JOIN frames f ON t.frame_id = f.frame_id
+        LEFT JOIN sources s ON t.source_id = s.source_id
+        WHERE t.timestamp >= ? AND t.timestamp <= ?
+        """
+        frame_params = [start, end]
+        if source_id:
+            frame_query += " AND t.source_id = ?"
+            frame_params.append(source_id)
+
+        # Transcription entries directly from transcriptions table
+        trans_query = """
+        SELECT
+            tr.transcription_id as entry_id,
+            tr.source_id,
+            tr.start_timestamp as timestamp,
+            NULL as frame_id,
+            tr.transcription_id,
+            NULL as similarity_score,
+            NULL as perceptual_hash,
+            NULL as frame_metadata,
             tr.text as transcript_text,
             tr.confidence,
             tr.language,
-            tr.start_timestamp,
-            tr.end_timestamp,
+            tr.start_timestamp as trans_start_timestamp,
+            tr.end_timestamp as trans_end_timestamp,
             tr.speaker_name,
             tr.speaker_confidence,
             s.source_type,
             s.filename,
             s.location,
             s.device_id,
-            s.metadata as source_metadata
-        FROM timeline t
-        LEFT JOIN frames f ON t.frame_id = f.frame_id
-        LEFT JOIN transcriptions tr ON t.transcription_id = tr.transcription_id
-        LEFT JOIN sources s ON t.source_id = s.source_id
-        WHERE t.timestamp >= ? AND t.timestamp <= ?
+            s.metadata as source_metadata,
+            'transcription' as entry_type
+        FROM transcriptions tr
+        LEFT JOIN sources s ON tr.source_id = s.source_id
+        WHERE tr.start_timestamp >= ? AND tr.start_timestamp <= ?
         """
-
-        params = [start, end]
+        trans_params = [start, end]
         if source_id:
-            query += " AND t.source_id = ?"
-            params.append(source_id)
+            trans_query += " AND tr.source_id = ?"
+            trans_params.append(source_id)
 
-        query += f" ORDER BY t.timestamp LIMIT {limit} OFFSET {offset}"
+        # Combine with UNION ALL
+        query = f"({frame_query}) UNION ALL ({trans_query}) ORDER BY timestamp LIMIT {limit} OFFSET {offset}"
+        params = frame_params + trans_params
 
         results = self.db.connection.execute(query, params).fetchall()
 
-        # Get annotations for this timeframe
-        annotations_by_timestamp = {}
-        if results:
-            # Get all source IDs in results
-            source_ids = set(row[1] for row in results)
-            for sid in source_ids:
-                annotations = self.db.get_annotations_for_timeline(sid, start, end)
-                for timestamp, anns in annotations.items():
-                    if timestamp not in annotations_by_timestamp:
-                        annotations_by_timestamp[timestamp] = []
-                    annotations_by_timestamp[timestamp].extend(anns)
+        # Get ALL annotations for this timeframe (from all sources including voice_notes)
+        annotations_by_timestamp = self.db.get_all_annotations_for_timerange(start, end)
 
-        # Note: Voice notes are now stored as transcriptions (source_type='user_recording')
-        # and will appear in the timeline query naturally via the transcriptions table.
+        # Voice notes appear automatically via the transcriptions UNION query above.
 
         entries = []
         for row in results:
@@ -204,19 +232,28 @@ class SearchService:
         # Sort entries by timestamp
         entries.sort(key=lambda e: e["timestamp"])
 
-        # Get total count
-        count_query = """
+        # Get total count (frames from timeline + transcriptions)
+        frame_count_query = """
         SELECT COUNT(*) FROM timeline t
         WHERE t.timestamp >= ? AND t.timestamp <= ?
         """
-        count_params = [start, end]
+        frame_count_params = [start, end]
         if source_id:
-            count_query += " AND t.source_id = ?"
-            count_params.append(source_id)
+            frame_count_query += " AND t.source_id = ?"
+            frame_count_params.append(source_id)
 
-        total_count = self.db.connection.execute(count_query, count_params).fetchone()[
-            0
-        ]
+        trans_count_query = """
+        SELECT COUNT(*) FROM transcriptions tr
+        WHERE tr.start_timestamp >= ? AND tr.start_timestamp <= ?
+        """
+        trans_count_params = [start, end]
+        if source_id:
+            trans_count_query += " AND tr.source_id = ?"
+            trans_count_params.append(source_id)
+
+        frame_count = self.db.connection.execute(frame_count_query, frame_count_params).fetchone()[0]
+        trans_count = self.db.connection.execute(trans_count_query, trans_count_params).fetchone()[0]
+        total_count = frame_count + trans_count
 
         return {
             "type": "timeline",
@@ -388,7 +425,7 @@ class AnnotationService:
 
         # Check if source exists
         result = self.db.connection.execute(
-            "SELECT source_id FROM sources WHERE source_type = 'user_recording' AND filename = 'user_annotations' LIMIT 1"
+            "SELECT source_id FROM sources WHERE source_type = 'voice_notes' AND filename = 'user_annotations' LIMIT 1"
         ).fetchone()
 
         if result:
@@ -399,7 +436,7 @@ class AnnotationService:
         from src.storage.models import Source
         now = datetime.utcnow()
         source = Source(
-            type="user_recording",
+            type="voice_notes",
             filename="user_annotations",
             location="user_created",
             start_timestamp=now,
@@ -560,7 +597,7 @@ class UserRecordingService:
 
         # Check if user recording source exists
         result = self.db.connection.execute(
-            "SELECT source_id FROM sources WHERE source_type = 'user_recording' LIMIT 1"
+            "SELECT source_id FROM sources WHERE source_type = 'voice_notes' LIMIT 1"
         ).fetchone()
 
         if result:
@@ -571,7 +608,7 @@ class UserRecordingService:
         from src.storage.models import Source
         now = datetime.utcnow()
         source = Source(
-            type="user_recording",
+            type="voice_notes",
             filename="user_recordings",
             location="user_recorded",
             start_timestamp=now,
@@ -693,6 +730,32 @@ class UserRecordingService:
             return None
 
         return sum(confidences) / len(confidences)
+
+    def transcribe_audio_only(self, audio_path: Path) -> dict[str, Any]:
+        """
+        Transcribe audio without saving to database.
+
+        Args:
+            audio_path: Path to the audio file
+
+        Returns:
+            Dictionary with transcription text and metadata
+        """
+        logger.info(f"Transcribing audio from {audio_path} (no save)")
+
+        result = self.transcriber.transcribe_audio(
+            audio_path,
+            identify_speakers=False
+        )
+
+        transcription_text = result.get("text", "").strip()
+
+        return {
+            "text": transcription_text,
+            "language": result.get("language", "en"),
+            "duration": result.get("duration", 0),
+            "confidence": result.get("confidence"),
+        }
 
     def __del__(self):
         """Cleanup database connection."""

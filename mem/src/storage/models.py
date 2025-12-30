@@ -3,14 +3,14 @@
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Source(BaseModel):
     """Represents a video/stream source."""
 
     id: Optional[int] = None
-    type: str = Field(..., pattern="^(video|stream|webcam|user_recording)$")
+    type: str = Field(..., pattern="^(video|stream|webcam|voice_notes)$")
     filename: str
     location: Optional[str] = None  # 'front_door', 'office', etc.
     device_id: Optional[str] = None  # Camera identifier
@@ -58,6 +58,14 @@ class Timeline(BaseModel):
     transcription_id: Optional[int] = None
     similarity_score: Optional[float] = 100.0  # 0-100, similarity to previous frame
 
+    @field_validator("similarity_score")
+    @classmethod
+    def validate_similarity_score(cls, v):
+        """Validate that similarity_score is between 0 and 100."""
+        if v is not None and (v < 0 or v > 100):
+            raise ValueError("similarity_score must be between 0 and 100")
+        return v
+
     @property
     def scene_changed(self) -> bool:
         """Computed scene change flag based on similarity score."""
@@ -84,6 +92,30 @@ class Transcription(BaseModel):
     speaker_id: Optional[int] = None  # Reference to speaker_profiles
     speaker_name: Optional[str] = None  # Speaker name at time of transcription
     speaker_confidence: Optional[float] = None  # Confidence of speaker ID (0-1)
+
+    @field_validator("end_timestamp")
+    @classmethod
+    def validate_timestamps(cls, v, info):
+        """Validate that end_timestamp is >= start_timestamp."""
+        if "start_timestamp" in info.data and v < info.data["start_timestamp"]:
+            raise ValueError("end_timestamp must be >= start_timestamp")
+        return v
+
+    @field_validator("confidence")
+    @classmethod
+    def validate_confidence(cls, v):
+        """Validate that confidence is between 0 and 1."""
+        if v is not None and (v < 0 or v > 1):
+            raise ValueError("confidence must be between 0 and 1")
+        return v
+
+    @field_validator("speaker_confidence")
+    @classmethod
+    def validate_speaker_confidence(cls, v):
+        """Validate that speaker_confidence is between 0 and 1."""
+        if v is not None and (v < 0 or v > 1):
+            raise ValueError("speaker_confidence must be between 0 and 1")
+        return v
 
     @property
     def word_count(self) -> int:
@@ -144,6 +176,14 @@ class TimeframeAnnotation(BaseModel):
     created_by: str = "system"
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    @field_validator("end_timestamp")
+    @classmethod
+    def validate_timestamps(cls, v, info):
+        """Validate that end_timestamp is >= start_timestamp."""
+        if "start_timestamp" in info.data and v < info.data["start_timestamp"]:
+            raise ValueError("end_timestamp must be >= start_timestamp")
+        return v
 
     @property
     def duration_seconds(self) -> float:

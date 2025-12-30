@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -13,10 +12,10 @@ from src.api.models import (
     CaptureSettingsUpdate,
     DefaultSettingsResponse,
     SettingsResponse,
-    STTDSettingsResponse,
-    STTDSettingsUpdate,
     StreamingSettingsResponse,
     StreamingSettingsUpdate,
+    STTDSettingsResponse,
+    STTDSettingsUpdate,
     UpdateSettingsRequest,
     UpdateSettingsResponse,
 )
@@ -25,10 +24,10 @@ from src.config import (
     CaptureConfig,
     CaptureFrameConfig,
     Config,
-    STTDConfig,
     StreamingCaptureConfig,
     StreamingConfig,
     StreamingRTMPConfig,
+    STTDConfig,
     config,
 )
 
@@ -36,14 +35,13 @@ logger = logging.getLogger(__name__)
 
 # Settings that require a restart to take effect
 RESTART_REQUIRED_SETTINGS = {
-    "sttd.model": "Whisper model is loaded at startup",
-    "sttd.device": "Device selection requires model reload",
-    "sttd.compute_type": "Compute type requires model reload",
+    "sttd.host": "STTD server connection needs reconnect",
+    "sttd.port": "STTD server connection needs reconnect",
     "streaming.max_concurrent_streams": "RTMP server configuration",
 }
 
 
-def _find_config_path() -> Optional[Path]:
+def _find_config_path() -> Path | None:
     """Find the config.yaml file path."""
     current = Path.cwd()
     config_paths = [
@@ -73,21 +71,10 @@ def _config_to_dict(cfg: Config) -> dict:
                 "sample_rate": cfg.capture.audio.sample_rate,
             },
         },
-        "whisper": {
-            "model": cfg.whisper.model,
-            "language": cfg.whisper.language,
-            "fallback_language": cfg.whisper.fallback_language,
-            "device": cfg.whisper.device,
-            "detect_non_speech": cfg.whisper.detect_non_speech,
-        },
         "sttd": {
-            "model": cfg.sttd.model,
-            "device": cfg.sttd.device,
-            "compute_type": cfg.sttd.compute_type,
-            "profiles_path": cfg.sttd.profiles_path,
-            "enable_diarization": cfg.sttd.enable_diarization,
-            "speaker_identification": cfg.sttd.speaker_identification,
-            "min_speaker_confidence": cfg.sttd.min_speaker_confidence,
+            "host": cfg.sttd.host,
+            "port": cfg.sttd.port,
+            "timeout": cfg.sttd.timeout,
         },
         "files": {
             "filename_format": cfg.files.filename_format,
@@ -165,12 +152,9 @@ class SettingsService:
                 ),
             ),
             sttd=STTDSettingsResponse(
-                model=config.sttd.model,
-                device=config.sttd.device,
-                compute_type=config.sttd.compute_type,
-                enable_diarization=config.sttd.enable_diarization,
-                speaker_identification=config.sttd.speaker_identification,
-                min_speaker_confidence=config.sttd.min_speaker_confidence,
+                host=config.sttd.host,
+                port=config.sttd.port,
+                timeout=config.sttd.timeout,
             ),
             streaming=StreamingSettingsResponse(
                 frame_interval_seconds=config.streaming.capture.frame_interval_seconds,
@@ -195,12 +179,9 @@ class SettingsService:
                 ),
             ),
             sttd=STTDSettingsResponse(
-                model=default_config.sttd.model,
-                device=default_config.sttd.device,
-                compute_type=default_config.sttd.compute_type,
-                enable_diarization=default_config.sttd.enable_diarization,
-                speaker_identification=default_config.sttd.speaker_identification,
-                min_speaker_confidence=default_config.sttd.min_speaker_confidence,
+                host=default_config.sttd.host,
+                port=default_config.sttd.port,
+                timeout=default_config.sttd.timeout,
             ),
             streaming=StreamingSettingsResponse(
                 frame_interval_seconds=default_config.streaming.capture.frame_interval_seconds,
@@ -219,20 +200,14 @@ class SettingsService:
         restart_required = False
         restart_reasons = []
 
-        # Track changes that require restart
+        # Track changes that require restart (STTD client reconnect)
         if request.sttd:
-            if request.sttd.model is not None and request.sttd.model != config.sttd.model:
+            if request.sttd.host is not None and request.sttd.host != config.sttd.host:
                 restart_required = True
-                restart_reasons.append(RESTART_REQUIRED_SETTINGS["sttd.model"])
-            if request.sttd.device is not None and request.sttd.device != config.sttd.device:
+                restart_reasons.append(RESTART_REQUIRED_SETTINGS["sttd.host"])
+            if request.sttd.port is not None and request.sttd.port != config.sttd.port:
                 restart_required = True
-                restart_reasons.append(RESTART_REQUIRED_SETTINGS["sttd.device"])
-            if (
-                request.sttd.compute_type is not None
-                and request.sttd.compute_type != config.sttd.compute_type
-            ):
-                restart_required = True
-                restart_reasons.append(RESTART_REQUIRED_SETTINGS["sttd.compute_type"])
+                restart_reasons.append(RESTART_REQUIRED_SETTINGS["sttd.port"])
 
         if request.streaming:
             if (
@@ -310,27 +285,9 @@ class SettingsService:
         """Update STTD settings in-memory."""
         sttd = config.sttd
         new_sttd = STTDConfig(
-            model=update.model if update.model is not None else sttd.model,
-            device=update.device if update.device is not None else sttd.device,
-            compute_type=(
-                update.compute_type if update.compute_type is not None else sttd.compute_type
-            ),
-            profiles_path=sttd.profiles_path,
-            enable_diarization=(
-                update.enable_diarization
-                if update.enable_diarization is not None
-                else sttd.enable_diarization
-            ),
-            speaker_identification=(
-                update.speaker_identification
-                if update.speaker_identification is not None
-                else sttd.speaker_identification
-            ),
-            min_speaker_confidence=(
-                update.min_speaker_confidence
-                if update.min_speaker_confidence is not None
-                else sttd.min_speaker_confidence
-            ),
+            host=update.host if update.host is not None else sttd.host,
+            port=update.port if update.port is not None else sttd.port,
+            timeout=update.timeout if update.timeout is not None else sttd.timeout,
         )
         # Update the global config
         import src.config
@@ -338,13 +295,17 @@ class SettingsService:
         src.config.config = Config(
             database=config.database,
             capture=config.capture,
-            whisper=config.whisper,
             sttd=new_sttd,
             files=config.files,
             api=config.api,
             streaming=config.streaming,
             logging=config.logging,
         )
+
+        # Reset the STTD client to use new connection settings
+        from src.capture.sttd_client import reset_sttd_client
+
+        reset_sttd_client()
 
     def _update_streaming_settings(self, update: StreamingSettingsUpdate) -> None:
         """Update streaming settings in-memory."""
@@ -379,7 +340,6 @@ class SettingsService:
         src.config.config = Config(
             database=config.database,
             capture=config.capture,
-            whisper=config.whisper,
             sttd=config.sttd,
             files=config.files,
             api=config.api,

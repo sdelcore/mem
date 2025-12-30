@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react'
 import { Upload, X, CheckCircle, AlertCircle, FileVideo, Clock } from 'lucide-react'
+import toast from 'react-hot-toast'
 import { API_BASE_URL } from '../../utils/config'
 
 interface VideoUploadProps {
@@ -91,25 +92,27 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
       }
 
       const result = await response.json()
-      
+
       // Update file status to success
-      setSelectedFiles(prev => prev.map(fs => 
-        fs.file === fileStatus.file 
+      setSelectedFiles(prev => prev.map(fs =>
+        fs.file === fileStatus.file
           ? { ...fs, status: 'success', jobId: result.job_id }
           : fs
       ))
-      
+
+      toast.success(`Upload complete: ${fileStatus.file.name}`)
       onUploadSuccess(result.job_id)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Upload failed'
-      
+
       // Update file status to error
-      setSelectedFiles(prev => prev.map(fs => 
-        fs.file === fileStatus.file 
+      setSelectedFiles(prev => prev.map(fs =>
+        fs.file === fileStatus.file
           ? { ...fs, status: 'error', error: errorMessage }
           : fs
       ))
-      
+
+      toast.error(`Upload failed: ${fileStatus.file.name} - ${errorMessage}`)
       onUploadError(`${fileStatus.file.name}: ${errorMessage}`)
     }
   }

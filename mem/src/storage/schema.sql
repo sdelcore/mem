@@ -8,7 +8,7 @@
 CREATE SEQUENCE IF NOT EXISTS sources_seq START 1;
 CREATE TABLE IF NOT EXISTS sources (
     source_id BIGINT PRIMARY KEY DEFAULT nextval('sources_seq'),
-    source_type VARCHAR NOT NULL CHECK (source_type IN ('video', 'stream', 'webcam', 'user_recording')),
+    source_type VARCHAR NOT NULL CHECK (source_type IN ('video', 'stream', 'webcam', 'voice_notes')),
     filename VARCHAR NOT NULL,
     location VARCHAR,  -- 'front_door', 'office', etc.
     device_id VARCHAR,  -- Camera identifier
@@ -260,7 +260,40 @@ FROM transcriptions t;
 
 -- Timeline with scene_changed flag
 CREATE OR REPLACE VIEW timeline_with_computed AS
-SELECT 
+SELECT
     t.*,
     CASE WHEN t.similarity_score < 95.0 THEN TRUE ELSE FALSE END as scene_changed
 FROM timeline t;
+
+-- ============================================================================
+-- DATA INTEGRITY CONSTRAINTS
+-- ============================================================================
+
+-- NOTE: DuckDB has limited support for CHECK constraints via ALTER TABLE.
+-- These constraints are documented here and enforced in the application layer
+-- (see src/storage/models.py for Pydantic validators and src/storage/db.py for
+-- runtime validation).
+
+-- CONSTRAINT: timeline entries should have frame_id OR transcription_id (at least one)
+-- Enforced in: Database.create_timeline_entry()
+-- CHECK (frame_id IS NOT NULL OR transcription_id IS NOT NULL)
+
+-- CONSTRAINT: similarity_score should be between 0 and 100
+-- Enforced in: Timeline model field_validator
+-- CHECK (similarity_score >= 0 AND similarity_score <= 100)
+
+-- CONSTRAINT: timestamps should be valid (end >= start for transcriptions)
+-- Enforced in: Transcription model field_validator
+-- CHECK (end_timestamp >= start_timestamp)
+
+-- CONSTRAINT: timestamps should be valid (end >= start for annotations)
+-- Enforced in: TimeframeAnnotation model field_validator
+-- CHECK (end_timestamp >= start_timestamp)
+
+-- CONSTRAINT: confidence should be between 0 and 1 for transcriptions
+-- Enforced in: Transcription model field_validator
+-- CHECK (confidence >= 0 AND confidence <= 1)
+
+-- CONSTRAINT: speaker_confidence should be between 0 and 1
+-- Enforced in: Transcription model field_validator
+-- CHECK (speaker_confidence >= 0 AND speaker_confidence <= 1)

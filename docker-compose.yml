@@ -6,6 +6,71 @@
 
 services:
   # ============================================================================
+  # STTD Server - GPU Version (Speech-to-Text with Diarization)
+  # ============================================================================
+  sttd:
+    image: registry.sdelcore.com/mem/sttd:${TAG:-latest}
+    build:
+      context: https://github.com/sdelcore/sttd.git
+      dockerfile: Dockerfile
+    container_name: mem-sttd
+    restart: unless-stopped
+    profiles: ["gpu"]
+    devices:
+      - nvidia.com/gpu=all
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-0}
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+    command: sttd server --host 0.0.0.0 --port 8765
+    ports:
+      - "${STTD_PORT:-8765}:8765"
+    networks:
+      - mem-network
+    volumes:
+      - sttd-models:/root/.cache/huggingface
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '4'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ============================================================================
+  # STTD Server - CPU Version
+  # ============================================================================
+  sttd-cpu:
+    image: registry.sdelcore.com/mem/sttd-cpu:${TAG:-latest}
+    build:
+      context: https://github.com/sdelcore/sttd.git
+      dockerfile: Dockerfile.cpu
+    container_name: mem-sttd
+    restart: unless-stopped
+    profiles: ["cpu"]
+    command: sttd server --host 0.0.0.0 --port 8765
+    ports:
+      - "${STTD_PORT:-8765}:8765"
+    networks:
+      - mem-network
+    volumes:
+      - sttd-models:/root/.cache/huggingface
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ============================================================================
   # Backend - GPU Version (requires NVIDIA GPU)
   # ============================================================================
   mem-backend:
@@ -16,30 +81,26 @@ services:
     container_name: mem-backend
     restart: unless-stopped
     profiles: ["gpu"]
-    devices:
-      - nvidia.com/gpu=all
     environment:
-      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-0}
-      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
       - PYTHONUNBUFFERED=1
       - MEM_CONFIG_PATH=/app/config/config.yaml
-      - WHISPER_DEVICE=cuda
-      - WHISPER_COMPUTE_TYPE=float16
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ./data/db:/data/db
       - ./data/uploads:/data/uploads
       - ./data/config:/app/config:ro
-      - whisper-models:/home/memuser/.cache/huggingface
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     networks:
       - mem-network
+    depends_on:
+      sttd:
+        condition: service_healthy
     deploy:
       resources:
         limits:
-          memory: 8G
-          cpus: '4'
+          memory: 4G
+          cpus: '2'
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
       interval: 30s
@@ -61,23 +122,23 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - MEM_CONFIG_PATH=/app/config/config.yaml
-      - WHISPER_DEVICE=cpu
-      - WHISPER_COMPUTE_TYPE=int8
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ./data/db:/data/db
       - ./data/uploads:/data/uploads
       - ./data/config:/app/config:ro
-      - whisper-models:/home/memuser/.cache/huggingface
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     networks:
       - mem-network
+    depends_on:
+      sttd-cpu:
+        condition: service_healthy
     deploy:
       resources:
         limits:
-          memory: 4G
-          cpus: '4'
+          memory: 2G
+          cpus: '2'
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
       interval: 30s
@@ -165,5 +226,5 @@ networks:
         - subnet: 172.28.0.0/16
 
 volumes:
-  whisper-models:
+  sttd-models:
     driver: local

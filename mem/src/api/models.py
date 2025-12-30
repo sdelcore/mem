@@ -320,14 +320,11 @@ class CaptureSettingsResponse(BaseModel):
 
 
 class STTDSettingsResponse(BaseModel):
-    """STTD transcription settings."""
+    """STTD server settings."""
 
-    model: str
-    device: str
-    compute_type: str
-    enable_diarization: bool
-    speaker_identification: bool
-    min_speaker_confidence: float
+    host: str
+    port: int
+    timeout: float
 
 
 class StreamingSettingsResponse(BaseModel):
@@ -369,14 +366,11 @@ class CaptureSettingsUpdate(BaseModel):
 
 
 class STTDSettingsUpdate(BaseModel):
-    """Update STTD settings."""
+    """Update STTD server settings."""
 
-    model: Optional[str] = None
-    device: Optional[str] = None
-    compute_type: Optional[str] = None
-    enable_diarization: Optional[bool] = None
-    speaker_identification: Optional[bool] = None
-    min_speaker_confidence: Optional[float] = None
+    host: Optional[str] = None
+    port: Optional[int] = None
+    timeout: Optional[float] = None
 
 
 class StreamingSettingsUpdate(BaseModel):

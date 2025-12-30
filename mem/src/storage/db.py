@@ -88,6 +88,7 @@ class Database:
     @contextmanager
     def transaction(self):
         """Context manager for database transactions."""
+        self.connection.execute("BEGIN")
         try:
             yield self.connection
             self.connection.commit()
@@ -269,7 +270,22 @@ class Database:
 
         Returns:
             Generated entry_id
+
+        Raises:
+            ValueError: If timeline entry violates integrity constraints
         """
+        # Validate that at least one of frame_id or transcription_id is set
+        if timeline.frame_id is None and timeline.transcription_id is None:
+            raise ValueError(
+                "Timeline entry must have either frame_id or transcription_id"
+            )
+
+        # Validate similarity_score range (also validated by Pydantic model)
+        if timeline.similarity_score is not None and (
+            timeline.similarity_score < 0 or timeline.similarity_score > 100
+        ):
+            raise ValueError("similarity_score must be between 0 and 100")
+
         with self.transaction() as conn:
             result = conn.execute(
                 """
@@ -325,7 +341,27 @@ class Database:
 
         Returns:
             Generated transcription_id
+
+        Raises:
+            ValueError: If transcription violates integrity constraints
         """
+        # Validate timestamps (also validated by Pydantic model)
+        if transcription.end_timestamp < transcription.start_timestamp:
+            raise ValueError("end_timestamp must be >= start_timestamp")
+
+        # Validate confidence range (also validated by Pydantic model)
+        if transcription.confidence is not None and (
+            transcription.confidence < 0 or transcription.confidence > 1
+        ):
+            raise ValueError("confidence must be between 0 and 1")
+
+        # Validate speaker_confidence range (also validated by Pydantic model)
+        if transcription.speaker_confidence is not None and (
+            transcription.speaker_confidence < 0
+            or transcription.speaker_confidence > 1
+        ):
+            raise ValueError("speaker_confidence must be between 0 and 1")
+
         with self.transaction() as conn:
             result = conn.execute(
                 """
@@ -351,6 +387,38 @@ class Database:
             )
             return result.fetchone()[0]
 
+    def update_transcription_speaker(
+        self,
+        transcription_id: int,
+        speaker_name: Optional[str],
+        speaker_id: Optional[int] = None,
+        speaker_confidence: Optional[float] = None,
+    ) -> bool:
+        """
+        Update speaker information for a transcription.
+
+        Args:
+            transcription_id: ID of transcription to update
+            speaker_name: New speaker name (free text or from profile)
+            speaker_id: Optional speaker profile ID (if from registered profile)
+            speaker_confidence: Optional confidence score (1.0 for manual override)
+
+        Returns:
+            True if updated, False if transcription not found
+        """
+        with self.transaction() as conn:
+            result = conn.execute(
+                """
+                UPDATE transcriptions
+                SET speaker_name = ?,
+                    speaker_id = ?,
+                    speaker_confidence = ?
+                WHERE transcription_id = ?
+                """,
+                [speaker_name, speaker_id, speaker_confidence, transcription_id],
+            )
+            return result.rowcount > 0
+
     # Query operations
     def get_timeline_range(
         self,
@@ -362,6 +430,9 @@ class Database:
         """
         Get timeline entries for time range.
 
+        Combines frame entries from timeline table with transcriptions queried
+        directly. Transcriptions auto-appear without needing timeline entries.
+
         Args:
             start: Start timestamp
             end: End timestamp
@@ -371,7 +442,8 @@ class Database:
         Returns:
             List of timeline entries with associated data
         """
-        query = """
+        # Build frame query from timeline table
+        frame_query = """
             SELECT
                 t.entry_id,
                 t.timestamp,
@@ -380,24 +452,48 @@ class Database:
                 s.filename,
                 t.frame_id,
                 t.similarity_score,
-                tr.text as transcript_text,
-                tr.confidence as transcript_confidence
+                NULL as transcript_text,
+                NULL as transcript_confidence,
+                'frame' as entry_type
             FROM timeline t
             JOIN sources s ON t.source_id = s.source_id
-            LEFT JOIN transcriptions tr
-                ON t.transcription_id = tr.transcription_id
             WHERE t.timestamp >= ? AND t.timestamp <= ?
         """
-        params = [start, end]
+        frame_params = [start, end]
 
         if source_id:
-            query += " AND t.source_id = ?"
-            params.append(source_id)
+            frame_query += " AND t.source_id = ?"
+            frame_params.append(source_id)
 
         if not include_unchanged:
-            query += " AND t.similarity_score < 95.0"
+            frame_query += " AND t.similarity_score < 95.0"
 
-        query += " ORDER BY t.timestamp, t.source_id"
+        # Build transcription query (direct from transcriptions table)
+        trans_query = """
+            SELECT
+                tr.transcription_id as entry_id,
+                tr.start_timestamp as timestamp,
+                tr.source_id,
+                s.location,
+                s.filename,
+                NULL as frame_id,
+                NULL as similarity_score,
+                tr.text as transcript_text,
+                tr.confidence as transcript_confidence,
+                'transcription' as entry_type
+            FROM transcriptions tr
+            JOIN sources s ON tr.source_id = s.source_id
+            WHERE tr.start_timestamp >= ? AND tr.start_timestamp <= ?
+        """
+        trans_params = [start, end]
+
+        if source_id:
+            trans_query += " AND tr.source_id = ?"
+            trans_params.append(source_id)
+
+        # Combine with UNION ALL
+        query = f"({frame_query}) UNION ALL ({trans_query}) ORDER BY timestamp, source_id"
+        params = frame_params + trans_params
 
         result = self.connection.execute(query, params)
 
@@ -415,6 +511,7 @@ class Database:
                     "scene_changed": row[6] < 95.0 if row[6] is not None else False,
                     "transcript_text": row[7],
                     "transcript_confidence": row[8],
+                    "entry_type": row[9],
                 }
             )
 
@@ -538,7 +635,7 @@ class Database:
         Returns:
             Number of unique frames
         """
-        query = "SELECT COUNT(*) FROM unique_frames WHERE source_id = ?"
+        query = "SELECT COUNT(*) FROM frames WHERE source_id = ?"
         result = self.connection.execute(query, [source_id]).fetchone()
         return result[0] if result else 0
 
@@ -568,11 +665,11 @@ class Database:
         frame_stats = self.connection.execute(
             """
             SELECT
-                COUNT(DISTINCT uf.frame_id) as unique_frames,
+                COUNT(DISTINCT f.frame_id) as unique_frames,
                 COUNT(t.entry_id) as total_timeline_entries,
-                SUM(OCTET_LENGTH(uf.image_data)) / (1024.0 * 1024.0) as total_size_mb
-            FROM unique_frames uf
-            LEFT JOIN timeline t ON uf.frame_id = t.frame_id
+                SUM(OCTET_LENGTH(f.image_data)) / (1024.0 * 1024.0) as total_size_mb
+            FROM frames f
+            LEFT JOIN timeline t ON f.frame_id = t.frame_id
         """
         ).fetchone()
 
@@ -667,7 +764,14 @@ class Database:
 
         Returns:
             annotation_id of created annotation
+
+        Raises:
+            ValueError: If annotation violates integrity constraints
         """
+        # Validate timestamps (also validated by Pydantic model)
+        if annotation.end_timestamp < annotation.start_timestamp:
+            raise ValueError("end_timestamp must be >= start_timestamp")
+
         with self.transaction() as conn:
             result = conn.execute(
                 """
@@ -856,6 +960,54 @@ class Database:
                 created_at=row[8],
                 updated_at=row[9],
             )
+
+            if timestamp not in annotations_by_timestamp:
+                annotations_by_timestamp[timestamp] = []
+            annotations_by_timestamp[timestamp].append(annotation)
+
+        return annotations_by_timestamp
+
+    def get_all_annotations_for_timerange(
+        self, start: datetime, end: datetime
+    ) -> dict[datetime, list["TimeframeAnnotation"]]:
+        """
+        Get all annotations in a time range, grouped by start timestamp.
+
+        Unlike get_annotations_for_timeline, this fetches annotations from ALL
+        sources (including voice_notes), not just sources with frames/transcripts.
+
+        Args:
+            start: Start timestamp
+            end: End timestamp
+
+        Returns:
+            Dictionary mapping start_timestamps to their annotations
+        """
+        query = """
+            SELECT * FROM timeframe_annotations
+            WHERE start_timestamp >= ? AND start_timestamp <= ?
+            ORDER BY start_timestamp, created_at DESC
+        """
+
+        result = self.connection.execute(query, [start, end]).fetchall()
+
+        from src.storage.models import TimeframeAnnotation
+
+        annotations_by_timestamp = {}
+        for row in result:
+            annotation = TimeframeAnnotation(
+                annotation_id=row[0],
+                source_id=row[1],
+                start_timestamp=row[2],
+                end_timestamp=row[3],
+                annotation_type=row[4],
+                content=row[5],
+                metadata=json.loads(row[6]) if row[6] else None,
+                created_by=row[7],
+                created_at=row[8],
+                updated_at=row[9],
+            )
+            timestamp = annotation.start_timestamp
 
             if timestamp not in annotations_by_timestamp:
                 annotations_by_timestamp[timestamp] = []
@@ -1092,7 +1244,7 @@ class Database:
         self.connection.execute("DROP TABLE IF EXISTS timeline")
         self.connection.execute("DROP TABLE IF EXISTS transcriptions")
         self.connection.execute("DROP TABLE IF EXISTS timeframe_annotations")
-        self.connection.execute("DROP TABLE IF EXISTS unique_frames")
+        self.connection.execute("DROP TABLE IF EXISTS frames")
         self.connection.execute("DROP TABLE IF EXISTS speaker_profiles")
         self.connection.execute("DROP TABLE IF EXISTS sources")
 

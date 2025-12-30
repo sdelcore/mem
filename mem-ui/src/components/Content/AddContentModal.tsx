@@ -1,8 +1,9 @@
 import React, { useState, useRef } from 'react'
 import { format } from 'date-fns'
-import { X, MessageSquare, Mic, Square, Send } from 'lucide-react'
+import { X, Mic, Square, Send, Loader2 } from 'lucide-react'
+import toast from 'react-hot-toast'
 import { useCreateAnnotation } from '../../hooks/useAnnotations'
-import { useCreateVoiceNote } from '../../hooks/useVoiceNotes'
+import { useTranscribe } from '../../hooks/useTranscribe'
 
 interface AddContentModalProps {
   isOpen: boolean
@@ -11,7 +12,7 @@ interface AddContentModalProps {
   onContentCreated?: () => void
 }
 
-type ModalMode = 'select' | 'text' | 'voice'
+type RecordingState = 'idle' | 'recording' | 'transcribing'
 
 const AddContentModal: React.FC<AddContentModalProps> = ({
   isOpen,
@@ -19,11 +20,10 @@ const AddContentModal: React.FC<AddContentModalProps> = ({
   timestamp,
   onContentCreated,
 }) => {
-  const [mode, setMode] = useState<ModalMode>('select')
   const [annotationText, setAnnotationText] = useState('')
-  const [isRecording, setIsRecording] = useState(false)
+  const [recordingState, setRecordingState] = useState<RecordingState>('idle')
   const [recordingDuration, setRecordingDuration] = useState(0)
-  const [isProcessing, setIsProcessing] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -31,28 +31,27 @@ const AddContentModal: React.FC<AddContentModalProps> = ({
   const streamRef = useRef<MediaStream | null>(null)
 
   const createAnnotation = useCreateAnnotation()
-  const createVoiceNote = useCreateVoiceNote()
+  const transcribe = useTranscribe()
 
   const resetState = () => {
-    setMode('select')
     setAnnotationText('')
-    setIsRecording(false)
+    setRecordingState('idle')
     setRecordingDuration(0)
-    setIsProcessing(false)
+    setIsSaving(false)
   }
 
   const handleClose = () => {
-    if (isRecording) {
+    if (recordingState === 'recording') {
       stopRecording()
     }
     resetState()
     onClose()
   }
 
-  const handleSubmitText = async () => {
+  const handleSubmit = async () => {
     if (!annotationText.trim()) return
 
-    setIsProcessing(true)
+    setIsSaving(true)
     try {
       await createAnnotation.mutateAsync({
         timestamp,
@@ -63,9 +62,9 @@ const AddContentModal: React.FC<AddContentModalProps> = ({
       handleClose()
     } catch (error) {
       console.error('Failed to create annotation:', error)
-      alert('Failed to create annotation. Please try again.')
+      toast.error('Failed to create annotation. Please try again.')
     } finally {
-      setIsProcessing(false)
+      setIsSaving(false)
     }
   }
 
@@ -73,9 +72,9 @@ const AddContentModal: React.FC<AddContentModalProps> = ({
     if (!window.isSecureContext) {
       const currentUrl = window.location.href
       const httpsUrl = currentUrl.replace('http://', 'https://')
-      alert(
-        `Microphone access requires a secure connection (HTTPS).\n\n` +
-        `Please access the site via:\n${httpsUrl}`
+      toast.error(
+        `Microphone access requires a secure connection (HTTPS). Please access the site via: ${httpsUrl}`,
+        { duration: 6000 }
       )
       return
     }
@@ -108,21 +107,26 @@ const AddContentModal: React.FC<AddContentModalProps> = ({
           streamRef.current = null
         }
 
-        setIsProcessing(true)
+        setRecordingState('transcribing')
         try {
-          await createVoiceNote.mutateAsync(blob)
-          onContentCreated?.()
-          handleClose()
+          const result = await transcribe.mutateAsync(blob)
+          // Append transcription to existing text
+          setAnnotationText(prev => {
+            if (prev.trim()) {
+              return prev.trim() + ' ' + result.text
+            }
+            return result.text
+          })
         } catch (error) {
-          console.error('Failed to create voice recording:', error)
-          alert('Failed to transcribe voice recording. Please try again.')
+          console.error('Failed to transcribe recording:', error)
+          toast.error('Failed to transcribe. Please try again or type your note.')
         } finally {
-          setIsProcessing(false)
+          setRecordingState('idle')
         }
       }
 
       mediaRecorder.start()
-      setIsRecording(true)
+      setRecordingState('recording')
       setRecordingDuration(0)
 
       timerRef.current = setInterval(() => {
@@ -131,14 +135,13 @@ const AddContentModal: React.FC<AddContentModalProps> = ({
 
     } catch (error) {
       console.error('Failed to start recording:', error)
-      alert('Failed to access microphone. Please ensure microphone permissions are granted.')
+      toast.error('Failed to access microphone. Please ensure microphone permissions are granted.')
     }
   }
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    if (mediaRecorderRef.current && recordingState === 'recording') {
       mediaRecorderRef.current.stop()
-      setIsRecording(false)
       if (timerRef.current) {
         clearInterval(timerRef.current)
         timerRef.current = null
@@ -152,7 +155,17 @@ const AddContentModal: React.FC<AddContentModalProps> = ({
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
+  const handleMicClick = () => {
+    if (recordingState === 'recording') {
+      stopRecording()
+    } else if (recordingState === 'idle') {
+      startRecording()
+    }
+  }
+
   if (!isOpen) return null
+
+  const isDisabled = recordingState === 'transcribing' || isSaving
 
   return (
     <div className="fixed inset-0 z-50 bg-black bg-opacity-50 flex items-center justify-center p-4">
@@ -160,7 +173,7 @@ const AddContentModal: React.FC<AddContentModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-cream-200">
           <div>
-            <h2 className="text-lg font-semibold text-forest-700">Add Content</h2>
+            <h2 className="text-lg font-semibold text-forest-700">Add Note</h2>
             <p className="text-sm text-sage-500">
               {format(timestamp, 'MMM dd, yyyy HH:mm:ss')}
             </p>
@@ -176,148 +189,80 @@ const AddContentModal: React.FC<AddContentModalProps> = ({
 
         {/* Content */}
         <div className="p-4">
-          {mode === 'select' && (
-            <div className="space-y-3">
-              <p className="text-sm text-sage-600 mb-4">
-                Choose what you'd like to add at this timestamp:
-              </p>
+          <div className="space-y-4">
+            {/* Textarea with mic button */}
+            <div className="relative">
+              <textarea
+                value={annotationText}
+                onChange={(e) => setAnnotationText(e.target.value)}
+                placeholder={
+                  recordingState === 'transcribing'
+                    ? 'Transcribing...'
+                    : 'Type your note or click the mic to record...'
+                }
+                className="w-full h-32 p-3 pr-12 border border-cream-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-forest-300 resize-none disabled:bg-cream-50 disabled:text-sage-400"
+                disabled={isDisabled}
+                autoFocus
+              />
+              {/* Mic button inside textarea */}
               <button
-                onClick={() => setMode('text')}
-                className="w-full flex items-center gap-3 p-4 border border-cream-200 rounded-lg hover:bg-cream-50 transition-colors"
+                onClick={handleMicClick}
+                disabled={recordingState === 'transcribing'}
+                className={`absolute right-2 top-2 p-2 rounded-lg transition-all ${
+                  recordingState === 'recording'
+                    ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse'
+                    : recordingState === 'transcribing'
+                    ? 'bg-sage-200 text-sage-400 cursor-not-allowed'
+                    : 'bg-forest-100 hover:bg-forest-200 text-forest-600'
+                }`}
+                aria-label={recordingState === 'recording' ? 'Stop recording' : 'Start recording'}
               >
-                <div className="p-2 bg-sage-100 rounded-lg">
-                  <MessageSquare className="w-5 h-5 text-sage-600" />
-                </div>
-                <div className="text-left">
-                  <p className="font-medium text-forest-700">Add Text Note</p>
-                  <p className="text-sm text-sage-500">Write a note or annotation</p>
-                </div>
-              </button>
-              <button
-                onClick={() => setMode('voice')}
-                className="w-full flex items-center gap-3 p-4 border border-cream-200 rounded-lg hover:bg-cream-50 transition-colors"
-              >
-                <div className="p-2 bg-forest-100 rounded-lg">
-                  <Mic className="w-5 h-5 text-forest-600" />
-                </div>
-                <div className="text-left">
-                  <p className="font-medium text-forest-700">Record Voice</p>
-                  <p className="text-sm text-sage-500">Record and transcribe audio</p>
-                </div>
+                {recordingState === 'recording' ? (
+                  <Square className="w-5 h-5" />
+                ) : recordingState === 'transcribing' ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Mic className="w-5 h-5" />
+                )}
               </button>
             </div>
-          )}
 
-          {mode === 'text' && (
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="annotation-text" className="block text-sm font-medium text-forest-700 mb-2">
-                  Your note
-                </label>
-                <textarea
-                  id="annotation-text"
-                  value={annotationText}
-                  onChange={(e) => setAnnotationText(e.target.value)}
-                  placeholder="Type your note here..."
-                  className="w-full h-32 p-3 border border-cream-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-forest-300 resize-none"
-                  autoFocus
-                />
+            {/* Recording indicator */}
+            {recordingState === 'recording' && (
+              <div className="flex items-center gap-2 text-sm text-red-600">
+                <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                <span>Recording: {formatDuration(recordingDuration)}</span>
               </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setMode('select')}
-                  className="flex-1 px-4 py-2.5 border border-cream-200 rounded-lg hover:bg-cream-50 transition-colors text-sage-600"
-                  disabled={isProcessing}
-                >
-                  Back
-                </button>
-                <button
-                  onClick={handleSubmitText}
-                  disabled={!annotationText.trim() || isProcessing}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-forest-500 text-white rounded-lg hover:bg-forest-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isProcessing ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="w-4 h-4" />
-                      Save Note
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
+            )}
 
-          {mode === 'voice' && (
-            <div className="space-y-4">
-              <div className="text-center py-8">
-                {isRecording ? (
+            {/* Action buttons */}
+            <div className="flex gap-3">
+              <button
+                onClick={handleClose}
+                className="flex-1 px-4 py-2.5 border border-cream-200 rounded-lg hover:bg-cream-50 transition-colors text-sage-600"
+                disabled={isDisabled}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={!annotationText.trim() || isDisabled}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-forest-500 text-white rounded-lg hover:bg-forest-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSaving ? (
                   <>
-                    <div className="mb-4">
-                      <div className="w-20 h-20 mx-auto bg-red-500 rounded-full flex items-center justify-center animate-pulse">
-                        <Mic className="w-10 h-10 text-white" />
-                      </div>
-                    </div>
-                    <p className="text-2xl font-mono text-forest-700 mb-2">
-                      {formatDuration(recordingDuration)}
-                    </p>
-                    <p className="text-sm text-sage-500">Recording...</p>
-                  </>
-                ) : isProcessing ? (
-                  <>
-                    <div className="mb-4">
-                      <div className="w-20 h-20 mx-auto bg-sage-300 rounded-full flex items-center justify-center">
-                        <div className="w-10 h-10 border-4 border-white border-t-transparent rounded-full animate-spin" />
-                      </div>
-                    </div>
-                    <p className="text-lg text-forest-700 mb-2">Transcribing...</p>
-                    <p className="text-sm text-sage-500">Please wait while we process your recording</p>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Saving...
                   </>
                 ) : (
                   <>
-                    <div className="mb-4">
-                      <div className="w-20 h-20 mx-auto bg-forest-100 rounded-full flex items-center justify-center">
-                        <Mic className="w-10 h-10 text-forest-600" />
-                      </div>
-                    </div>
-                    <p className="text-lg text-forest-700 mb-2">Ready to record</p>
-                    <p className="text-sm text-sage-500">Click the button below to start recording</p>
+                    <Send className="w-4 h-4" />
+                    Save Note
                   </>
                 )}
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setMode('select')}
-                  className="flex-1 px-4 py-2.5 border border-cream-200 rounded-lg hover:bg-cream-50 transition-colors text-sage-600"
-                  disabled={isRecording || isProcessing}
-                >
-                  Back
-                </button>
-                {isRecording ? (
-                  <button
-                    onClick={stopRecording}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
-                  >
-                    <Square className="w-4 h-4" />
-                    Stop Recording
-                  </button>
-                ) : (
-                  <button
-                    onClick={startRecording}
-                    disabled={isProcessing}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-forest-500 text-white rounded-lg hover:bg-forest-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Mic className="w-4 h-4" />
-                    Start Recording
-                  </button>
-                )}
-              </div>
+              </button>
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>

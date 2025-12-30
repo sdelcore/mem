@@ -349,11 +349,11 @@ class VideoCaptureProcessor:
                     )
                     continue
 
-                # Store transcriptions including non-speech markers
+                # Only store transcriptions with actual speech content
                 text = result.get("text", "").strip()
-                if text or result.get(
+                if text and not result.get(
                     "is_non_speech", False
-                ):  # Store non-empty or non-speech
+                ):  # Skip silence, music, background noise, etc.
                     # Get segments for speaker and confidence extraction
                     segments = result.get("segments", [])
 
@@ -413,7 +413,8 @@ class VideoCaptureProcessor:
                         f"Transcribed chunk {chunk['index']}: {len(result['text'])} chars, confidence: {confidence:.2f}"
                     )
                 else:
-                    logger.info(f"Chunk {chunk['index']} had no text content")
+                    audio_type = result.get("audio_type", "empty")
+                    logger.info(f"Chunk {chunk['index']} skipped: {audio_type}")
 
             logger.info(f"Processed {chunk_count} chunks")
         logger.info(f"Total transcriptions created: {transcript_count}")

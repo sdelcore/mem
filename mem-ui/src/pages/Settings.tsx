@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Save, RotateCcw, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
+import toast from 'react-hot-toast'
 import { useSettings } from '../hooks/useSettings'
 import {
   SettingSection,
@@ -90,8 +91,10 @@ function Settings() {
 
       if (result.restart_required) {
         setRestartWarning(result.restart_reason || 'Some changes require a restart to take effect.')
+        toast.success('Settings saved! Restart required for some changes.')
       } else {
         setRestartWarning(null)
+        toast.success('Settings saved successfully!')
       }
 
       setSaveSuccess(true)
@@ -99,6 +102,7 @@ function Settings() {
       setTimeout(() => setSaveSuccess(false), 3000)
     } catch (error) {
       console.error('Failed to save settings:', error)
+      toast.error('Failed to save settings. Please try again.')
     }
   }
 
