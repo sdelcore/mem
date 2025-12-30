@@ -1068,28 +1068,27 @@ class Database:
         Returns:
             Generated profile_id
         """
-        with self.transaction() as conn:
-            result = conn.execute(
-                """
-                INSERT INTO speaker_profiles (
-                    name, display_name, audio_sample, embedding_data, metadata,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                RETURNING profile_id
-                """,
-                [
-                    profile.name,
-                    profile.display_name,
-                    profile.audio_sample,
-                    profile.embedding_data,
-                    json.dumps(profile.metadata) if profile.metadata else None,
-                    profile.created_at,
-                    profile.updated_at,
-                ],
-            )
-            profile_id = result.fetchone()[0]
-            logger.info(f"Created speaker profile {profile_id} for '{profile.name}'")
-            return profile_id
+        result = self.connection.execute(
+            """
+            INSERT INTO speaker_profiles (
+                name, display_name, audio_sample, embedding_data, metadata,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            RETURNING profile_id
+            """,
+            [
+                profile.name,
+                profile.display_name,
+                profile.audio_sample,
+                profile.embedding_data,
+                json.dumps(profile.metadata) if profile.metadata else None,
+                profile.created_at,
+                profile.updated_at,
+            ],
+        )
+        profile_id = result.fetchone()[0]
+        logger.info(f"Created speaker profile {profile_id} for '{profile.name}'")
+        return profile_id
 
     def get_speaker_profile(self, profile_id: int) -> Optional[SpeakerProfile]:
         """
