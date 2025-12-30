@@ -6,19 +6,22 @@ import { API_BASE_URL } from '../../utils/config'
 interface VideoUploadProps {
   onUploadSuccess: (jobId: string) => void
   onUploadError: (error: string) => void
+  onNavigateToTime?: (date: Date) => void
 }
 
 interface FileStatus {
   file: File
-  status: 'pending' | 'uploading' | 'success' | 'error'
+  status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error'
   error?: string
   jobId?: string
   progress?: number
+  timestamp?: Date
 }
 
 const VideoUpload: React.FC<VideoUploadProps> = ({
   onUploadSuccess,
   onUploadError,
+  onNavigateToTime,
 }) => {
   const [selectedFiles, setSelectedFiles] = useState<FileStatus[]>([])
   const [isUploading, setIsUploading] = useState(false)
@@ -30,6 +33,51 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
     // Expected format: YYYY-MM-DD_HH-MM-SS.(mp4|mkv)
     const pattern = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.(mp4|mkv)$/
     return pattern.test(fileName)
+  }
+
+  const parseTimestampFromFilename = (filename: string): Date | null => {
+    const match = filename.match(/^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/)
+    if (!match) return null
+    const [, year, month, day, hour, minute, second] = match
+    return new Date(Date.UTC(
+      parseInt(year), parseInt(month) - 1, parseInt(day),
+      parseInt(hour), parseInt(minute), parseInt(second)
+    ))
+  }
+
+  const pollJobStatus = async (jobId: string, file: File): Promise<void> => {
+    const maxAttempts = 120  // 10 minutes max (120 * 5s)
+    const pollInterval = 5000  // 5 seconds
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/jobs/${jobId}`)
+        if (!response.ok) break
+
+        const job = await response.json()
+
+        if (job.status === 'completed') {
+          const timestamp = parseTimestampFromFilename(file.name)
+          setSelectedFiles(prev => prev.map(fs =>
+            fs.file === file
+              ? { ...fs, status: 'completed', timestamp: timestamp || undefined }
+              : fs
+          ))
+          return
+        } else if (job.status === 'failed') {
+          setSelectedFiles(prev => prev.map(fs =>
+            fs.file === file
+              ? { ...fs, status: 'error', error: job.error || 'Processing failed' }
+              : fs
+          ))
+          return
+        }
+      } catch (error) {
+        console.error('Job polling error:', error)
+      }
+
+      await new Promise(resolve => setTimeout(resolve, pollInterval))
+    }
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -93,15 +141,18 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
 
       const result = await response.json()
 
-      // Update file status to success
+      // Update file status to processing (upload done, now processing)
       setSelectedFiles(prev => prev.map(fs =>
         fs.file === fileStatus.file
-          ? { ...fs, status: 'success', jobId: result.job_id }
+          ? { ...fs, status: 'processing', jobId: result.job_id }
           : fs
       ))
 
       toast.success(`Upload complete: ${fileStatus.file.name}`)
       onUploadSuccess(result.job_id)
+
+      // Start polling for job completion
+      pollJobStatus(result.job_id, fileStatus.file)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Upload failed'
 
@@ -146,7 +197,7 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
   }
 
   const clearCompleted = () => {
-    setSelectedFiles(prev => prev.filter(fs => fs.status === 'pending' || fs.status === 'uploading'))
+    setSelectedFiles(prev => prev.filter(fs => fs.status === 'pending' || fs.status === 'uploading' || fs.status === 'processing'))
   }
 
   const clearAll = () => {
@@ -160,13 +211,14 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
       case 'pending':
         return <Clock className="w-4 h-4 text-sage-400" />
       case 'uploading':
+      case 'processing':
         return (
           <div className="relative">
             <div className="animate-spin rounded-full h-4 w-4 border-2 border-cream-200"></div>
             <div className="animate-spin rounded-full h-4 w-4 border-2 border-transparent border-t-sage-300 absolute top-0"></div>
           </div>
         )
-      case 'success':
+      case 'completed':
         return <CheckCircle className="w-4 h-4 text-sage-500" />
       case 'error':
         return <AlertCircle className="w-4 h-4 text-red-500" />
@@ -174,7 +226,8 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
   }
 
   const pendingCount = selectedFiles.filter(fs => fs.status === 'pending').length
-  const successCount = selectedFiles.filter(fs => fs.status === 'success').length
+  const processingCount = selectedFiles.filter(fs => fs.status === 'processing').length
+  const completedCount = selectedFiles.filter(fs => fs.status === 'completed').length
   const errorCount = selectedFiles.filter(fs => fs.status === 'error').length
   const totalCount = selectedFiles.length
 
@@ -222,7 +275,8 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
               <h3 className="text-sm font-medium text-forest-700">Upload Queue</h3>
               <div className="flex items-center gap-2 text-xs text-sage-500">
                 {pendingCount > 0 && <span>{pendingCount} pending</span>}
-                {successCount > 0 && <span className="text-sage-500">{successCount} completed</span>}
+                {processingCount > 0 && <span>{processingCount} processing</span>}
+                {completedCount > 0 && <span className="text-sage-500">{completedCount} completed</span>}
                 {errorCount > 0 && <span className="text-red-600">{errorCount} failed</span>}
               </div>
             </div>
@@ -250,8 +304,29 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
                     {fileStatus.error && (
                       <p className="text-xs text-red-600 mt-1">{fileStatus.error}</p>
                     )}
-                    {fileStatus.jobId && (
-                      <p className="text-xs text-sage-500 mt-1">Job ID: {fileStatus.jobId}</p>
+                    {fileStatus.status === 'processing' && fileStatus.jobId && (
+                      <p className="text-xs text-sage-500 mt-1">Processing...</p>
+                    )}
+                    {fileStatus.status === 'completed' && (
+                      <div className="flex items-center gap-2 text-xs mt-1">
+                        {fileStatus.jobId && (
+                          <span className="text-sage-400">Job ID: {fileStatus.jobId}</span>
+                        )}
+                        {onNavigateToTime && fileStatus.timestamp && (
+                          <>
+                            <span className="text-sage-300">|</span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                onNavigateToTime(fileStatus.timestamp!)
+                              }}
+                              className="text-forest-500 hover:text-forest-700 hover:underline font-medium"
+                            >
+                              View in timeline
+                            </button>
+                          </>
+                        )}
+                      </div>
                     )}
                   </div>
                   {fileStatus.status === 'pending' && !isUploading && (
@@ -284,7 +359,7 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
                 </span>
               )}
               <div className="flex items-center justify-center sm:justify-end gap-4">
-                {successCount > 0 && (
+                {completedCount > 0 && (
                   <button
                     onClick={clearCompleted}
                     className="py-2 px-3 min-h-11 text-sm text-sage-500 hover:text-sage-600"
