@@ -1002,7 +1002,7 @@ async def create_voice_note(
 ):
     """Create a transcription from audio file upload.
 
-    The audio will be transcribed using Whisper and speaker identification
+    The audio will be transcribed using STTD and speaker identification
     will be attempted using registered voice profiles. The result is stored
     as a transcription (not an annotation).
 
@@ -1085,7 +1085,7 @@ async def update_settings(request: UpdateSettingsRequest):
     Updates settings and persists them to config.yaml.
     Returns updated settings and indicates if restart is required.
 
-    Note: Some settings (like Whisper model, device) require a restart
+    Note: Some settings (like transcription model, device) require a restart
     to take effect. The response will indicate which settings require restart.
     """
     try:

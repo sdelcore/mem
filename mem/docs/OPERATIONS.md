@@ -3,9 +3,9 @@
 ## Deployment
 
 ### Prerequisites
-- Python 3.9
+- Python 3.10-3.12
 - FFmpeg 
-- 4GB+ RAM for Whisper models
+- STTD service (running on network)
 - 10GB+ disk space for database growth
 
 ### Production Deployment
@@ -87,7 +87,7 @@ curl http://localhost:8000/api/status | jq '.'
 - **Job queue length**: Track processing backlog
 - **API response times**: Especially for search queries
 - **Disk usage**: Both database and temp files
-- **Memory usage**: Whisper models consume significant RAM
+- **STTD availability**: Monitor transcription service health
 
 ### Logging
 ```python
@@ -148,10 +148,15 @@ capture:
   frame:
     interval_seconds: 10         # Reduce for lower storage
     jpeg_quality: 80            # Balance quality/size
+  audio:
+    chunk_duration_seconds: 60   # 1-minute chunks
+    overlap_seconds: 5           # Prevent word cutoffs
 
-whisper:
-  model: "small"                # Better accuracy in production
-  device: "cuda"                # Use GPU if available
+sttd:
+  host: "sttd-server.local"     # STTD service host
+  port: 8765
+  timeout: 300.0
+  identify_speakers: true
 ```
 
 ### Resource Limits
@@ -167,12 +172,12 @@ CPUQuota=200%              # 2 CPU cores max
 
 ### Common Issues
 
-#### 1. Out of Memory During Transcription
-**Symptom**: Process killed during audio processing
+#### 1. STTD Connection Failed
+**Symptom**: Transcription fails with connection refused
 **Solution**: 
-- Use smaller Whisper model (tiny/base)
-- Increase system RAM
-- Add swap space
+- Check STTD service is running (`systemctl --user status sttd-server`)
+- Verify host/port in config.yaml
+- Check network connectivity to STTD server
 
 #### 2. Database Lock Errors
 **Symptom**: "database is locked" errors

@@ -198,7 +198,7 @@ def extract_audio(video_path: Path, output_path: Optional[Path] = None) -> Path:
         "-acodec",
         "pcm_s16le",  # PCM 16-bit
         "-ar",
-        "16000",  # 16kHz sample rate for Whisper
+        "16000",  # 16kHz sample rate for transcription
         "-ac",
         "1",  # Mono
         "-y",  # Overwrite output

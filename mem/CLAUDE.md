@@ -86,9 +86,11 @@ make format && make lint   # Format and lint before commit
 
 - `src/capture/` - Core capture functionality
   - `extractor.py` - Frame extraction, timestamp parsing, video info
-  - `transcriber.py` - Whisper audio transcription
+  - `transcriber.py` - STTD client for audio transcription
+  - `sttd_client.py` - HTTP client for STTD service
   - `pipeline.py` - Main processing pipeline that orchestrates capture
   - `frame.py` - Frame processing with perceptual hashing for deduplication
+  - `stream_server.py` - RTMP streaming session management
 
 - `src/storage/` - Database operations
   - `db.py` - DuckDB database operations
@@ -122,7 +124,7 @@ make format && make lint   # Format and lint before commit
 3. **Create source**: Register video in database
 4. **Extract frames**: Every N seconds, convert to JPEG, store as BLOB
 5. **Extract audio**: Use FFmpeg to get audio track
-6. **Transcribe**: Process in 5-minute chunks with Whisper
+6. **Transcribe**: Process in 60-second chunks via STTD service
 7. **Store**: Save everything with absolute UTC timestamps
 
 ## Development Standards
@@ -193,10 +195,17 @@ jpeg_bytes = frame_to_jpeg(numpy_frame, quality=85)
 
 ### Capture Settings (config.yaml)
 - Frame interval: 5 seconds
-- Audio chunk duration: 300 seconds (5 minutes)
+- Audio chunk duration: 60 seconds
+- Audio overlap: 5 seconds
 - JPEG quality: 85
-- Whisper model: base
+- Transcription model: base (via STTD service)
 - Frame deduplication: Enabled (95% similarity threshold)
+
+### STTD Configuration
+- Host: nightman.tap (or configured host)
+- Port: 8765
+- Timeout: 300 seconds
+- Speaker identification: Enabled
 
 ### Environment Variables
 - None currently used (simplified from previous version)
@@ -210,7 +219,9 @@ jpeg_bytes = frame_to_jpeg(numpy_frame, quality=85)
 - Filename validation and timestamp parsing
 - Frame extraction and JPEG conversion
 - Audio extraction with FFmpeg
-- Whisper transcription
+- STTD transcription with speaker diarization
+- RTMP streaming with nginx-rtmp
+- Voice profile management
 - REST API for capture and data retrieval
 - Test coverage for models, database, and deduplication
 
@@ -266,8 +277,8 @@ curl "http://localhost:8000/api/search?type=frame&frame_id=1" --output frame.jpg
 
 - **Invalid filename**: Videos must be named `YYYY-MM-DD_HH-MM-SS.mp4`
 - **FFmpeg not found**: Use `nix develop` to ensure FFmpeg is available
-- **Whisper model download**: First run will download models (~100MB+)
-- **Out of memory**: Use smaller Whisper model (tiny or base)
+- **STTD not available**: Ensure STTD service is running (`systemctl --user start sttd-server`)
+- **Transcription fails**: Check STTD connection at configured host:port
 - **API not starting**: Ensure port 8000 is available or specify different port
 
 ## Future Development

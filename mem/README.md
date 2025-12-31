@@ -6,7 +6,8 @@ Mem is a video processing system that extracts frames and transcriptions from vi
 
 - **Temporal Architecture**: All data anchored to absolute UTC timestamps
 - **90% Storage Reduction**: Perceptual hash deduplication for frames
-- **AI Transcription**: Local Whisper models for privacy
+- **AI Transcription**: STTD service with speaker diarization
+- **RTMP Streaming**: Live capture from OBS Studio
 - **REST API**: FastAPI with interactive docs at `/docs`
 - **Self-Contained**: Database stores frames as BLOBs, no external dependencies
 - **Strict Format**: Videos must follow `YYYY-MM-DD_HH-MM-SS.mp4` naming
@@ -14,9 +15,9 @@ Mem is a video processing system that extracts frames and transcriptions from vi
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.9 (exact version required)
+- Python 3.10-3.12
 - FFmpeg for audio extraction
-- 4GB+ RAM for Whisper models
+- STTD service for transcription (running on network)
 
 ### Installation
 ```bash
@@ -99,7 +100,7 @@ See [Development Guide](docs/DEVELOPMENT.md) for detailed instructions.
 ## 🔒 Security & Privacy
 
 - All processing happens locally (no cloud APIs)
-- Whisper models run on-device
+- STTD transcription runs on your network
 - Database can be encrypted at filesystem level
 - No authentication in current version (see [Operations Guide](docs/OPERATIONS.md) for adding it)
 

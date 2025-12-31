@@ -57,7 +57,7 @@ erDiagram
         text text "transcribed audio content"
         double confidence "nullable: confidence score"
         varchar language "nullable: detected language"
-        varchar whisper_model "model used for transcription"
+        varchar whisper_model "model used for transcription (legacy field name)"
     }
     
     timeframe_annotations {
@@ -128,7 +128,7 @@ Audio-to-text segments with time ranges.
 | text | TEXT | Transcribed text content |
 | confidence | DOUBLE | Optional: confidence score |
 | language | VARCHAR(10) | Optional: detected language |
-| whisper_model | VARCHAR | Model used (default: 'base') |
+| whisper_model | VARCHAR | Model used (default: 'base') - legacy field name, now stores STTD model |
 
 ### timeframe_annotations
 User and AI-generated annotations for specific timeframes. Allows adding context, notes, summaries, and analysis results without modifying the original captured data.

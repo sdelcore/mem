@@ -26,7 +26,9 @@ mem/
 │   ├── capture/           # Data extraction
 │   │   ├── extractor.py   # Frame extraction, timestamp parsing
 │   │   ├── frame.py       # Perceptual hashing and deduplication
-│   │   ├── transcriber.py # Whisper audio transcription
+│   │   ├── transcriber.py # STTD client for transcription
+│   │   ├── sttd_client.py # HTTP client for STTD service
+│   │   ├── stream_server.py # RTMP streaming session management
 │   │   └── pipeline.py    # Processing orchestration
 │   │
 │   ├── storage/           # Database layer
@@ -147,10 +149,11 @@ parse_video_timestamp("2025-08-22_14-30-45.mp4")
 - Stores unique frames only
 
 ### 3. Audio Transcription
-- Chunks audio into 5-minute segments
-- Uses OpenAI Whisper (base model default)
+- Chunks audio into 60-second segments with 5-second overlap
+- Sends to STTD service (speech-to-text daemon)
+- Speaker diarization and identification
 - Stores with start/end UTC timestamps
-- Includes confidence scores
+- Includes confidence scores and speaker info
 
 ## Configuration
 
@@ -159,16 +162,19 @@ Via `config.yaml`:
 database:
   path: "mem.duckdb"
 
+sttd:
+  host: "nightman.tap"       # STTD server host
+  port: 8765                 # STTD server port
+  timeout: 300.0             # Request timeout
+  identify_speakers: true    # Enable speaker identification
+
 capture:
   frame:
     interval_seconds: 5      # Frame extraction interval
     jpeg_quality: 85         # JPEG compression quality
   audio:
-    chunk_duration_seconds: 300  # 5-minute chunks
-
-whisper:
-  model: "base"
-  language: "auto"
+    chunk_duration_seconds: 60   # 1-minute chunks
+    overlap_seconds: 5           # Overlap between chunks
 
 api:
   host: "0.0.0.0"
@@ -235,15 +241,23 @@ api:
 - No cloud dependencies for capture
 - No authentication (current version)
 - Database can be encrypted at filesystem level
-- Whisper runs locally (no API calls)
+- STTD runs on your network (no external API calls)
+
+## Streaming Support
+
+### RTMP Architecture
+- nginx-rtmp receives streams from OBS Studio
+- Stream validation via HTTP callbacks to backend
+- exec_push runs stream_handler.py for frame extraction
+- Frames POSTed to backend API for storage
+
+### Stream Flow
+```
+OBS -> nginx-rtmp:1935 -> HTTP callbacks -> mem-backend
+                       -> exec_push -> stream_handler.py -> POST frames -> mem-backend
+```
 
 ## Future Enhancements
-
-### Streaming Support
-- RTMP ingestion for OBS
-- WebRTC for browser capture
-- Real-time frame processing
-- Live transcription
 
 ### Analysis Pipeline
 - Vision model integration (CLIP, YOLO)

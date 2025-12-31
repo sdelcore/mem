@@ -275,11 +275,11 @@ function Settings() {
         {/* Transcription Settings */}
         <SettingSection
           title="Transcription Settings"
-          description="Configure Whisper model and speaker identification"
+          description="Configure transcription model and speaker identification"
           requiresRestart
         >
           <SettingDropdown
-            label="Whisper Model"
+            label="Transcription Model"
             value={sttd.model}
             options={[
               { value: 'tiny', label: 'Tiny (fastest, least accurate)' },

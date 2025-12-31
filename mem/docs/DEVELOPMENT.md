@@ -3,9 +3,9 @@
 ## Environment Setup
 
 ### Prerequisites
-- Python 3.9 (exact version required)
+- Python 3.10-3.12
 - FFmpeg for audio extraction
-- 4GB+ RAM for Whisper models
+- STTD service (running on network)
 - Nix package manager (optional, for reproducible environment)
 
 ### Quick Start
@@ -66,7 +66,9 @@ mem/
 │   │   ├── pipeline.py # Main orchestration
 │   │   ├── extractor.py # Frame/audio extraction
 │   │   ├── frame.py    # Deduplication logic
-│   │   └── transcriber.py # Whisper integration
+│   │   ├── transcriber.py # STTD client wrapper
+│   │   ├── sttd_client.py # HTTP client for STTD service
+│   │   └── stream_server.py # RTMP streaming management
 │   │
 │   ├── storage/        # Database layer
 │   │   ├── db.py       # DuckDB operations
@@ -388,7 +390,8 @@ refactor: Simplify pipeline processing
 
 ### Common Problems
 - **FFmpeg not found**: Install or use `nix develop`
-- **Out of memory**: Use smaller Whisper model
+- **STTD not available**: Start STTD server (`systemctl --user start sttd-server`)
+- **Transcription fails**: Check STTD host/port in config.yaml
 - **Slow processing**: Increase frame interval
 - **Database locked**: Check for multiple writers
 
@@ -396,5 +399,5 @@ refactor: Simplify pipeline processing
 
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
 - [DuckDB Documentation](https://duckdb.org/docs/)
-- [OpenAI Whisper](https://github.com/openai/whisper)
+- [STTD (Speech-to-Text Daemon)](https://github.com/sdelcore/sttd)
 - [Perceptual Hashing](https://github.com/JohannesBuchner/imagehash)

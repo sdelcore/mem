@@ -148,7 +148,7 @@ curl http://localhost:8000/api/streams/{stream_key}
 
 ## Future Enhancements
 
-1. **Audio Transcription**: Add Whisper processing for stream audio
+1. **Audio Transcription**: Add STTD processing for stream audio
 2. **Real-time Display**: Show live frames in timeline
 3. **Remote Streaming**: Accept streams from external sources
 4. **Multiple Protocols**: Support RTSP, WebRTC

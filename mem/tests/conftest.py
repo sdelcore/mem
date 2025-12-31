@@ -112,7 +112,7 @@ def sample_transcription():
         confidence=0.95,
         language="en",
         word_count=8,
-        model_name="whisper-base",
+        model_name="base",
     )
 
 

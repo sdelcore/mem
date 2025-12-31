@@ -7,7 +7,7 @@ Video processing system that captures frames and transcriptions from video files
 - **Frame Deduplication** - Perceptual hashing reduces storage from ~2.4GB to ~120MB per day
 - **Speaker Diarization** - Automatic speaker labeling with voice profile matching
 - **Live Streaming** - RTMP server for OBS Studio and IP cameras
-- **GPU Transcription** - CUDA-accelerated Whisper (runs locally, no cloud)
+- **GPU Transcription** - STTD service with speaker identification (runs locally, no cloud)
 - **Temporal Queries** - All data anchored to UTC timestamps
 - **Self-Contained** - Frames stored as BLOBs in DuckDB
 
@@ -133,7 +133,7 @@ This ensures the UI displays the correct RTMP URL for OBS configuration.
 │  └─────────────┘    └──────────────────────────┘   │
 │  ┌─────────────┐    ┌──────────────────────────┐   │
 │  │Audio Extract│───▶│ STTD Service (external)  │   │
-│  │             │    │ Whisper + Diarization    │   │
+│  │             │    │ Transcription + Speaker ID│   │
 │  └─────────────┘    └──────────────────────────┘   │
 └────────────────────────┬─────────────────────────────┘
                          ▼

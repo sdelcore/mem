@@ -10,7 +10,7 @@ Key features:
 - Process video files (must be named `YYYY-MM-DD_HH-MM-SS.mp4`)
 - Receive multiple concurrent RTMP streams from OBS Studio
 - Extract frames with configurable intervals
-- Generate transcriptions using Whisper
+- Generate transcriptions via STTD service (speech-to-text with diarization)
 - Store frames as BLOBs with deduplication
 - Timeline-based temporal queries
 
@@ -156,7 +156,7 @@ Key tables with temporal indexing:
 - `sources`: Video/stream sources with UTC timestamps
 - `unique_frames`: Deduplicated frames with perceptual hashes (BLOB storage)
 - `timeline`: Central temporal index mapping timestamps to frames/transcriptions
-- `transcriptions`: Whisper-generated audio segments
+- `transcriptions`: STTD-generated audio segments with speaker info
 - `timeframe_annotations`: User and AI-generated annotations
 - `streams`: Active streaming sessions with metadata
 
@@ -167,7 +167,7 @@ Key tables with temporal indexing:
 2. Extract UTC timestamp from filename
 3. Extract frames at configured intervals (default 5 seconds)
 4. Apply perceptual hashing for deduplication
-5. Extract and transcribe audio with Whisper
+5. Extract and transcribe audio via STTD service
 6. Store all data with absolute UTC timestamps
 
 ### Stream Processing (nginx-rtmp Architecture)
@@ -226,7 +226,7 @@ tests/test_models.py           # Pydantic models
 tests/test_frame.py            # Frame processing and deduplication
 tests/test_api_services.py    # API service layer
 tests/test_extractor.py       # Video extraction (if exists)
-tests/test_transcriber.py     # Whisper transcription (if exists)
+tests/test_transcriber.py     # STTD transcription
 tests/conftest.py              # Shared fixtures
 
 # Manual API testing
@@ -343,8 +343,9 @@ Key packages:
 
 ### External Services
 - **STTD**: Speech-to-text with diarization service (GPU or CPU mode)
-  - Runs as separate container
-  - Handles Whisper transcription and speaker identification
+  - Runs as systemd service on network host
+  - Handles transcription and speaker identification
+  - Start with: `systemctl --user start sttd-server`
 
 ### Frontend
 - `react` & `react-dom`: UI framework
